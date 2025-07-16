@@ -11,10 +11,3 @@
 
 [dev]
   functions = "netlify/functions"
-
-# Scheduled function - každých 30 sekúnd
-[[plugins]]
-  package = "@netlify/plugin-functions"
-
-[functions.auto-sync]
-  schedule = "*/30 * * * * *"
