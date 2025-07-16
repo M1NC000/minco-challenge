@@ -44,7 +44,7 @@ exports.handler = async (event, context) => {
       
       if (!isNaN(equity)) {
         // Aktualizovať kapitál cez našu API
-        const updateResponse = await fetch(`${process.env.URL}/.netlify/functions/capital`, {
+        const updateResponse = await fetch(`${process.env.SITE_URL}/.netlify/functions/capital`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
