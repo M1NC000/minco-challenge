@@ -698,9 +698,10 @@
     <script>
         // Konfigurácia pre Netlify API
         const API_CONFIG = {
-            endpoint: '/.netlify/functions/capital', // Netlify function endpoint
-            updateInterval: 5000, // 5 sekúnd aktualizácia
-            isProduction: window.location.hostname !== 'localhost' // Auto-detect environment
+            endpoint: '/.netlify/functions/live-sync', 
+            updateInterval: 2000,  
+            isProduction: true     
+
         };
 
         // Globálne premenné pre kapitál
