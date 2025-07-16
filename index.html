@@ -1,0 +1,1283 @@
+        /*
+        🚀 NETLIFY DEPLOYMENT GUIDE - AUTOMATICKÉ RIEŠENIE:
+        
+        1. AUTOMATICKÉ FUNKCIE:
+           ✅ Kapitál sa aktualizuje automaticky z MT5
+           ✅ Dni sa označujú automaticky na základe kapitálu  
+           ✅ Live trade informácie (profit/loss z otvorených pozícií)
+           ✅ Žiadne manuálne checkboxy - všetko automatické
+        
+        2. API ENDPOINT (/api/capital):
+           {
+               "amount": 25.50,           // Aktuálny kapitál
+               "dailyProfit": 2.30,       // Denný zisk/strata
+               "totalProfit": 10.50,      // Celkový profit od začiatku
+               "liveTradeProfit": -1.20,  // Aktuálny floating P&L
+               "tradingStatus": "EUR/USD Long", // Status obchodu
+               "lastUpdate": "2025-07-16T10:30:00Z"
+           }
+        
+        3. AUTOMATICKÉ OZNAČOVANIE:
+           - Ak kapitál = 22€ → dni 1-4 označené ako HOTOVO
+           - Ak kapitál = 45€ → dni 1-8 označené ako HOTOVO
+           - Označuje sa vždy od vrchu nadol na základe dosiahnutej sumy
+        
+        4. LIVE TRADE SEKCIA:
+           - Namiesto "NÁSOBENIE" → "LIVE TRADE"
+           - Zobrazuje aktuálny floating profit/loss
+           - Zelená farba pre profit, červená pre loss
+           - Ak nie sú pozície → "Žiadne pozície"
+        
+        5. MT5 SCRIPT AKTUALIZÁCIA:
+           Pošle tieto údaje cez Telegram:
+           "EQUITY:25.50|DAILY:2.30|LIVE:-1.20|STATUS:EUR/USD Long"
+        
+        6. DEPLOYMENT:
+           - Všetko kompletne automatické
+           - Žiadne manuálne ovládanie
+           - Real-time aktualizácie každých 5 sekúnd
+           - 100% zadarmo na Netlify
+        */ <!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8" />
+    <style>
+        @import url("https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css");
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        * {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            margin: 0px;
+            padding: 0;
+            min-height: 100vh;
+            background-color: #080808;
+            font-family: "Inter", Helvetica;
+            image-rendering: crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+        }
+        
+        button:focus-visible {
+            outline: 2px solid #4a90e2 !important;
+            outline: -webkit-focus-ring-color auto 5px !important;
+        }
+        
+        a {
+            text-decoration: none;
+        }
+
+        /* Pozadie - nezávislé od obsahu */
+        .background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #080808;
+            z-index: 1;
+        }
+
+        .ellipse {
+            top: -885px;
+            left: -524px;
+            position: fixed;
+            width: 1000px;
+            height: 1000px;
+            background-color: #759cff;
+            border-radius: 500px;
+            filter: blur(750px);
+            z-index: 1;
+        }
+
+        .ellipse-2 {
+            top: 1543px;
+            left: 1340px;
+            position: fixed;
+            width: 1000px;
+            height: 1000px;
+            background-color: #759cff;
+            border-radius: 500px;
+            filter: blur(750px);
+            z-index: 1;
+        }
+
+        /* Hlavný obsah */
+        .desktop {
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            z-index: 2;
+        }
+
+        .content-container {
+            width: 100%;
+            max-width: 1440px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        .subtitle-small {
+            width: 100%;
+            max-width: 400px;
+            font-family: "Inter", Helvetica;
+            font-weight: 600;
+            color: #ffffff80;
+            font-size: clamp(0.75rem, 1vw, 0.875rem);
+            text-align: center;
+            letter-spacing: 0.5px;
+            line-height: normal;
+            margin-bottom: 0.5rem;
+            margin-top: 150px;
+            text-rendering: optimizeLegibility;
+            text-transform: uppercase;
+        }
+
+        .text-wrapper {
+            width: 100%;
+            max-width: 800px;
+            -webkit-text-stroke: 1px transparent;
+            background: linear-gradient(180deg, rgba(215, 215, 215, 1) 0%, rgba(113, 113, 113, 1) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            font-size: clamp(3rem, 6vw, 4.5rem);
+            text-align: center;
+            letter-spacing: 0;
+            line-height: 1.1;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            text-rendering: optimizeLegibility;
+            text-transform: uppercase;
+        }
+
+        .text-wrapper-2 {
+            width: 100%;
+            max-width: 634px;
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #ffffff66;
+            font-size: clamp(0.875rem, 1.2vw, 0.9375rem);
+            text-align: center;
+            letter-spacing: 0;
+            line-height: 1.4;
+            margin-bottom: 3rem;
+            margin-top: 0.25rem;
+            text-rendering: optimizeLegibility;
+            text-transform: uppercase;
+        }
+
+        /* Real-time Capital Section */
+        .capital-section {
+            width: 100%;
+            max-width: 1312px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .capital-card {
+            width: 100%;
+            max-width: 800px;
+            background: linear-gradient(135deg, rgba(117, 156, 255, 0.12) 0%, rgba(0, 255, 136, 0.08) 100%);
+            border: 1px solid rgba(117, 156, 255, 0.3);
+            border-radius: 16px;
+            padding: clamp(1.5rem, 3vw, 2.5rem);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .capital-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px rgba(117, 156, 255, 0.1);
+            border-color: rgba(117, 156, 255, 0.4);
+        }
+
+        .capital-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .capital-card:hover::before {
+            left: 100%;
+        }
+
+        .capital-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #00ff88;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.6);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 15px rgba(0, 255, 136, 0.6);
+            }
+            50% {
+                box-shadow: 0 0 25px rgba(0, 255, 136, 0.8);
+            }
+            100% {
+                box-shadow: 0 0 15px rgba(0, 255, 136, 0.6);
+            }
+        }
+
+        .capital-title {
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #ffffff;
+            font-size: clamp(1rem, 1.5vw, 1.25rem);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0;
+        }
+
+        .capital-amount {
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #759cff;
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            text-transform: uppercase;
+            letter-spacing: -0.02em;
+            margin: 0.5rem 0;
+            text-shadow: 0 4px 20px rgba(117, 156, 255, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .capital-info {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .info-label {
+            font-family: "Inter", Helvetica;
+            font-weight: 500;
+            color: #ffffff80;
+            font-size: clamp(0.75rem, 1vw, 0.875rem);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .info-value {
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #ffffff;
+            font-size: clamp(0.875rem, 1.2vw, 1rem);
+            text-transform: uppercase;
+        }
+
+        .profit-value {
+            color: #00ff88;
+        }
+
+        .loss-value {
+            color: #ff4757;
+        }
+
+        .last-update {
+            font-family: "Inter", Helvetica;
+            font-weight: 500;
+            color: #ffffff60;
+            font-size: clamp(0.625rem, 0.8vw, 0.75rem);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-top: 1rem;
+        }
+
+        .table-container {
+            width: 100%;
+            max-width: 1312px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .frame {
+            display: flex;
+            width: 100%;
+            min-height: 85px;
+            align-items: center;
+        }
+
+        .table-row {
+            display: flex;
+            width: 100%;
+            min-height: 55px;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .table-row.completed {
+            background-color: rgba(0, 255, 136, 0.08);
+            border-left: 3px solid rgba(0, 255, 136, 0.6);
+            border-right: 3px solid rgba(0, 255, 136, 0.6);
+            border-top: 1px solid rgba(0, 255, 136, 0.3);
+            border-bottom: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .div-wrapper {
+            width: 100px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .DE-wrapper {
+            width: 268px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            margin-left: -1px;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .frame-2 {
+            width: 243px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            margin-left: -1px;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .frame-3 {
+            width: 298px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            margin-left: -1px;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .frame-4 {
+            width: 258px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            margin-left: -1px;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .frame-5 {
+            width: 150px;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+            align-self: stretch;
+            margin-left: -1px;
+            border: 1px solid #ffffff80;
+            display: flex;
+            align-items: center;
+        }
+
+        .text-wrapper-3 {
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #ffffff;
+            font-size: clamp(1rem, 1.5vw, 1.25rem);
+            text-align: center;
+            letter-spacing: 0.6px;
+            line-height: normal;
+            text-rendering: optimizeLegibility;
+            text-transform: uppercase;
+        }
+
+        .DE {
+            font-size: clamp(0.75rem, 1.2vw, 0.9375rem);
+            letter-spacing: 0.45px;
+            font-family: "Inter", Helvetica;
+            font-weight: 700;
+            color: #ffffff;
+            text-align: center;
+            line-height: normal;
+            word-break: break-word;
+            text-rendering: optimizeLegibility;
+            text-transform: uppercase;
+        }
+
+        .profit-text {
+            color: #00ff88 !important;
+        }
+
+        .final-result {
+            width: 100%;
+            max-width: 1312px;
+            padding: clamp(1.5rem, 3vw, 2.5rem);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid #ffffff40;
+            text-align: center;
+            color: #ffffff;
+            font-family: 'Inter', Helvetica;
+            font-weight: 700;
+            border-radius: 8px;
+            margin: 2rem 0;
+        }
+
+        .final-result-title {
+            font-size: clamp(1.25rem, 2vw, 1.5rem);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+        }
+
+        .final-amount {
+            font-size: clamp(2rem, 4vw, 3rem);
+            color: #759cff;
+            margin: 1rem 0;
+            text-transform: uppercase;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            border: 2px solid #ffffff40;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .checkbox-container input[type="checkbox"]:hover {
+            border-color: #ffffff60;
+            transform: scale(1.05);
+        }
+
+        .checkbox-container input[type="checkbox"]:checked {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            border-color: #00ff88;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+        }
+
+        .checkbox-container input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 700;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .checkbox-container span {
+            font-size: clamp(0.625rem, 1vw, 0.75rem);
+            color: #ffffff;
+            white-space: nowrap;
+            font-family: "Inter", Helvetica;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        /* Responzívny dizajn */
+        @media (max-width: 1440px) {
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .frame, .table-row {
+                min-width: 1312px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .desktop {
+                padding: 1.5rem 0.75rem;
+            }
+            
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .frame, .table-row {
+                min-width: 1312px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .desktop {
+                padding: 1rem 0.5rem;
+            }
+            
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                border: 1px solid #ffffff80;
+                border-radius: 4px;
+            }
+            
+            .frame, .table-row {
+                min-width: 1312px;
+            }
+            
+            .text-wrapper-3 {
+                font-size: 18px;
+            }
+            
+            .DE {
+                font-size: 13px;
+            }
+            
+            .checkbox-container span {
+                font-size: 11px;
+            }
+            
+            .capital-info {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .desktop {
+                padding: 0.75rem 0.25rem;
+            }
+            
+            .final-result {
+                padding: 1rem;
+            }
+            
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                border: 1px solid #ffffff80;
+                border-radius: 4px;
+            }
+            
+            .frame, .table-row {
+                min-width: 1312px;
+            }
+            
+            .text-wrapper-3 {
+                font-size: 16px;
+            }
+            
+            .DE {
+                font-size: 12px;
+            }
+            
+            .checkbox-container span {
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Nezávislé pozadie -->
+    <div class="background">
+        <div class="ellipse"></div>
+        <div class="ellipse-2"></div>
+    </div>
+
+    <!-- Hlavný obsah -->
+    <div class="desktop">
+        <div class="content-container">
+            <div class="subtitle-small">CESTA K MILIÓNOM</div>
+            <div class="text-wrapper">MINCO CHALLENGE</div>
+            <div class="text-wrapper-2">Z 15€ NA 30 MILIÓNOV</div>
+            
+            <!-- Real-time Capital Section -->
+            <div class="capital-section">
+                <div class="capital-card">
+                    <div class="capital-status">
+                        <div class="status-indicator"></div>
+                        <div class="capital-title">AKTUÁLNY KAPITÁL</div>
+                    </div>
+                    <div class="capital-amount" id="current-capital">0,00€</div>
+                    <div class="capital-info">
+                        <div class="info-item">
+                            <div class="info-label">DENNÝ ZISK</div>
+                            <div class="info-value profit-value" id="daily-profit">+0,00€</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">CELKOVÝ ZISK</div>
+                            <div class="info-value profit-value" id="total-profit">+0,00€</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">LIVE TRADE</div>
+                            <div class="info-value" id="live-trade">Žiadne pozície</div>
+                        </div>
+                    </div>
+                    <div class="last-update" id="last-update">Posledná aktualizácia: --:--</div>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div class="frame">
+                    <div class="div-wrapper"><div class="text-wrapper-3">DEŇ</div></div>
+                    <div class="DE-wrapper"><div class="text-wrapper-3">POČIATOČNÁ SUMA</div></div>
+                    <div class="frame-2"><div class="text-wrapper-3">DENNÝ ZISK</div></div>
+                    <div class="frame-3"><div class="text-wrapper-3">CELKOVÁ SUMA</div></div>
+                    <div class="frame-4"><div class="text-wrapper-3">POZNÁMKA</div></div>
+                    <div class="frame-5"><div class="text-wrapper-3">STAV</div></div>
+                </div>
+                <div id="table-rows"></div>
+            </div>
+            
+            <div class="final-result" id="final-result"></div>
+        </div>
+    </div>
+
+    <script>
+        // Konfigurácia pre Netlify API
+        const API_CONFIG = {
+            endpoint: '/.netlify/functions/capital', // Netlify function endpoint
+            updateInterval: 5000, // 5 sekúnd aktualizácia
+            isProduction: window.location.hostname !== 'localhost' // Auto-detect environment
+        };
+
+        // Globálne premenné pre kapitál
+        let currentCapitalData = {
+            amount: 15,
+            dailyProfit: 0,
+            totalProfit: 0,
+            liveTradeProfit: 0,
+            tradingStatus: 'Žiadne pozície',
+            lastUpdate: new Date()
+        };
+
+        function formatNumber(number, decimals = 2) {
+            return new Intl.NumberFormat('sk-SK', { 
+                minimumFractionDigits: decimals, 
+                maximumFractionDigits: decimals 
+            }).format(number);
+        }
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('sk-SK', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // Funkcia pre smooth aktualizáciu čísla
+        function animateValue(element, start, end, duration = 1000, formatFn = null) {
+            const startTime = Date.now();
+            const startValue = parseFloat(start) || 0;
+            const endValue = parseFloat(end) || 0;
+            const difference = endValue - startValue;
+            
+            function update() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const easeProgress = 1 - Math.pow(1 - progress, 3); // Easing function
+                
+                const currentValue = startValue + (difference * easeProgress);
+                
+                if (formatFn) {
+                    element.textContent = formatFn(currentValue);
+                } else {
+                    element.textContent = formatNumber(currentValue) + '€';
+                }
+                
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    // Finálna hodnota
+                    if (formatFn) {
+                        element.textContent = formatFn(endValue);
+                    } else {
+                        element.textContent = formatNumber(endValue) + '€';
+                    }
+                }
+            }
+            
+            requestAnimationFrame(update);
+        }
+
+        // Funkcia na aktualizáciu kapitálu v UI
+        function updateCapitalDisplay(data) {
+            const capitalElement = document.getElementById('current-capital');
+            const dailyProfitElement = document.getElementById('daily-profit');
+            const totalProfitElement = document.getElementById('total-profit');
+            const liveTradeElement = document.getElementById('live-trade');
+            const lastUpdateElement = document.getElementById('last-update');
+            
+            // Animované aktualizácie
+            if (capitalElement) {
+                const currentAmount = parseFloat(capitalElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
+                animateValue(capitalElement, currentAmount, data.amount);
+            }
+            
+            if (dailyProfitElement) {
+                const currentDaily = parseFloat(dailyProfitElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
+                animateValue(dailyProfitElement, currentDaily, data.dailyProfit, 800, (val) => {
+                    const sign = val >= 0 ? '+' : '';
+                    return sign + formatNumber(val) + '€';
+                });
+                
+                // Zmena farby na základe profitu/straty
+                if (data.dailyProfit >= 0) {
+                    dailyProfitElement.className = 'info-value profit-value';
+                } else {
+                    dailyProfitElement.className = 'info-value loss-value';
+                }
+            }
+            
+            if (totalProfitElement) {
+                const currentTotal = parseFloat(totalProfitElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
+                animateValue(totalProfitElement, currentTotal, data.totalProfit, 800, (val) => {
+                    const sign = val >= 0 ? '+' : '';
+                    return sign + formatNumber(val) + '€';
+                });
+                
+                // Zmena farby na základe profitu/straty
+                if (data.totalProfit >= 0) {
+                    totalProfitElement.className = 'info-value profit-value';
+                } else {
+                    totalProfitElement.className = 'info-value loss-value';
+                }
+            }
+            
+            if (liveTradeElement) {
+                // Live trade informácie
+                if (data.liveTradeProfit !== 0) {
+                    const sign = data.liveTradeProfit >= 0 ? '+' : '';
+                    liveTradeElement.textContent = sign + formatNumber(data.liveTradeProfit) + '€';
+                    
+                    if (data.liveTradeProfit >= 0) {
+                        liveTradeElement.className = 'info-value profit-value';
+                    } else {
+                        liveTradeElement.className = 'info-value loss-value';
+                    }
+                } else {
+                    liveTradeElement.textContent = data.tradingStatus || 'Žiadne pozície';
+                    liveTradeElement.className = 'info-value';
+                }
+            }
+            
+            if (lastUpdateElement) {
+                lastUpdateElement.textContent = `Posledná aktualizácia: ${formatTime(data.lastUpdate)}`;
+            }
+            
+            // Automatické označenie splnených dní na základe kapitálu
+            updateCompletedDays(data.amount);
+        }
+
+        // Automatické označenie splnených dní na základe kapitálu
+        function updateCompletedDays(currentCapital) {
+            if (!window.tableData) return;
+            
+            // Nájdi najvyšší deň, ktorý je dosiahnutý aktuálnym kapitálom
+            let completedDayIndex = -1;
+            
+            for (let i = 0; i < window.tableData.length; i++) {
+                if (currentCapital >= window.tableData[i].currentAmount) {
+                    completedDayIndex = i;
+                } else {
+                    break; // Zastav ak kapitál nie je dosť vysoký
+                }
+            }
+            
+            // Aktualizuj checkboxy - všetky do completedDayIndex označené, ostatné nie
+            document.querySelectorAll('input[type="checkbox"]').forEach((checkbox, index) => {
+                const span = checkbox.nextElementSibling;
+                const row = checkbox.closest('.table-row');
+                const shouldBeCompleted = index <= completedDayIndex;
+                
+                if (shouldBeCompleted !== checkbox.checked) {
+                    checkbox.checked = shouldBeCompleted;
+                    
+                    if (shouldBeCompleted) {
+                        span.textContent = 'HOTOVO';
+                        span.style.color = '#00ff88';
+                        span.style.fontWeight = '700';
+                        span.style.textTransform = 'uppercase';
+                        row.classList.add('completed');
+                    } else {
+                        span.textContent = 'V procese';
+                        span.style.color = '#ffffff';
+                        span.style.fontWeight = '500';
+                        span.style.textTransform = 'none';
+                        row.classList.remove('completed');
+                    }
+                }
+            });
+        }
+        // Simulácia dat pre demo (odstráňte v produkčnom prostredí)
+        function generateDemoData() {
+            const variation = (Math.random() - 0.5) * 10; // ±5€ variácia
+            const baseAmount = 15 + (Date.now() % 1000) / 100; // Simulácia rastúceho kapitálu
+            const liveTradeVariation = (Math.random() - 0.5) * 20; // ±10€ live trade
+            
+            return {
+                amount: baseAmount + variation,
+                dailyProfit: variation,
+                totalProfit: baseAmount - 15,
+                liveTradeProfit: Math.random() > 0.3 ? liveTradeVariation : 0, // 70% šanca na otvorenú pozíciu
+                tradingStatus: Math.random() > 0.3 ? 'Trading aktívny' : 'Žiadne pozície',
+                lastUpdate: new Date()
+            };
+        }
+
+        // Funkcia na získanie dát z Netlify API
+        async function fetchCapitalData() {
+            try {
+                const response = await fetch(API_CONFIG.endpoint, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Ak je production, použij skutočné dáta
+                if (API_CONFIG.isProduction && data.status === 'success') {
+                    currentCapitalData = {
+                        amount: data.amount || 15,
+                        dailyProfit: data.dailyProfit || 0,
+                        totalProfit: data.totalProfit || 0,
+                        liveTradeProfit: data.liveTradeProfit || 0,
+                        tradingStatus: data.tradingStatus || 'Žiadne pozície',
+                        lastUpdate: new Date(data.lastUpdate || Date.now())
+                    };
+                } else {
+                    // Demo data pre localhost/development
+                    const demoData = generateDemoData();
+                    currentCapitalData = {
+                        amount: demoData.amount,
+                        dailyProfit: demoData.dailyProfit,
+                        totalProfit: demoData.totalProfit,
+                        liveTradeProfit: demoData.liveTradeProfit,
+                        tradingStatus: demoData.tradingStatus,
+                        lastUpdate: new Date()
+                    };
+                }
+                
+                updateCapitalDisplay(currentCapitalData);
+                
+            } catch (error) {
+                console.error('Chyba pri načítavaní kapitálu:', error);
+                
+                // Fallback na demo data
+                const demoData = generateDemoData();
+                currentCapitalData = {
+                    amount: demoData.amount,
+                    dailyProfit: demoData.dailyProfit,
+                    totalProfit: demoData.totalProfit,
+                    liveTradeProfit: demoData.liveTradeProfit,
+                    tradingStatus: demoData.tradingStatus,
+                    lastUpdate: new Date()
+                };
+                
+                updateCapitalDisplay(currentCapitalData);
+            }
+        }
+
+        // Funkcia na spustenie pravidelnej aktualizácie
+        function startRealTimeUpdates() {
+            // Počiatočné načítanie
+            fetchCapitalData();
+            
+            // Pravidelné aktualizácie
+            setInterval(fetchCapitalData, API_CONFIG.updateInterval);
+        }
+
+        // Funkcia na zistenie najvyššieho splneného dňa
+        function getHighestCompletedDay() {
+            const savedStates = loadCheckboxStates();
+            let highestDay = 0;
+            
+            for (let i = 0; i < 100; i++) {
+                const checkboxId = `checkbox-${i}`;
+                if (savedStates[checkboxId]) {
+                    highestDay = i + 1;
+                }
+            }
+            
+            return highestDay;
+        }
+
+        // Funkcia na generovanie zdieľateľného linku
+        function generateShareLink() {
+            const highestDay = getHighestCompletedDay();
+            if (highestDay === 0) {
+                alert('Zatiaľ nemáte splnený žiadny deň!');
+                return;
+            }
+            
+            const baseUrl = window.location.href.split('?')[0];
+            const shareUrl = `${baseUrl}?day=${highestDay}`;
+            
+            // Skopírovať do schránky
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                alert(`Link skopírovaný do schránky!\nZdieľateľný progres po ${highestDay}. deň`);
+            }).catch(() => {
+                // Fallback pre staršie prehliadače
+                prompt('Skopírujte tento link:', shareUrl);
+            });
+        }
+
+        // Funkcia na zobrazenie progresu len po určitý deň
+        function getProgressForDay(dayLimit) {
+            const progress = {};
+            for (let i = 0; i < dayLimit && i < 100; i++) {
+                progress[`checkbox-${i}`] = true;
+            }
+            return progress;
+        }
+
+        // Funkcia na detekciu read-only režimu
+        function isReadOnlyMode() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const dayParam = urlParams.get('day');
+            return dayParam && parseInt(dayParam) > 0;
+        }
+
+        // Funkcia na získanie dňa z URL
+        function getDayFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const dayParam = urlParams.get('day');
+            return dayParam ? parseInt(dayParam) : 0;
+        }
+
+        // Zabezpečenie read-only režimu
+        function enforceReadOnlyMode() {
+            if (isReadOnlyMode()) {
+                // Odstráň všetky event listenery pre checkboxy
+                document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    checkbox.disabled = true;
+                    checkbox.style.pointerEvents = 'none';
+                    checkbox.style.opacity = '0.7';
+                    
+                    // Odstráň všetky existujúce event listenery
+                    const newCheckbox = checkbox.cloneNode(true);
+                    checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+                });
+                
+                // Zabráň všetkým pokusom o zmenu cez JavaScript
+                Object.defineProperty(window, 'saveCheckboxState', {
+                    value: function() { 
+                        return false; 
+                    },
+                    writable: false,
+                    configurable: false
+                });
+                
+                // Zablokuj localStorage zmeny
+                const originalSetItem = localStorage.setItem;
+                localStorage.setItem = function(key, value) {
+                    if (key === 'mincoCheckboxStates') {
+                        return false;
+                    }
+                    return originalSetItem.call(this, key, value);
+                };
+                
+                // Pridaj informačný text s dňom
+                const dayLimit = getDayFromUrl();
+                const infoDiv = document.createElement('div');
+                infoDiv.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid #ffffff40;
+                    color: #ffffff;
+                    padding: 10px 15px;
+                    border-radius: 8px;
+                    font-family: 'Inter', Helvetica;
+                    font-size: 12px;
+                    font-weight: 500;
+                    z-index: 1000;
+                    backdrop-filter: blur(10px);
+                `;
+                infoDiv.textContent = `👁️ Progres po ${dayLimit}. deň - iba na zobrazenie`;
+                document.body.appendChild(infoDiv);
+                
+                console.log('Read-only režim aktivovaný - všetky zmeny sú zakázané');
+            }
+        }
+
+        function saveCheckboxState(checkboxId, isChecked) {
+            // Zabráň ukladaniu v read-only režime
+            if (isReadOnlyMode()) {
+                return false;
+            }
+            
+            try {
+                const savedStates = JSON.parse(localStorage.getItem('mincoCheckboxStates') || '{}');
+                savedStates[checkboxId] = isChecked;
+                localStorage.setItem('mincoCheckboxStates', JSON.stringify(savedStates));
+            } catch (error) {
+                // Tichý error handling
+            }
+        }
+
+        function loadCheckboxStates() {
+            try {
+                const savedStates = JSON.parse(localStorage.getItem('mincoCheckboxStates') || '{}');
+                return savedStates;
+            } catch (error) {
+                return {};
+            }
+        }
+
+        function generateTable() {
+            const tableContainer = document.getElementById('table-rows');
+            const finalResultContainer = document.getElementById('final-result');
+            
+            let currentAmount = 15;
+            let dailyProfit = 5;
+            let cycle = 1;
+            let dayInCycle = 1;
+            let totalProfit = 0;
+            let data = [];
+            
+            // Generate data for 100 days
+            for (let day = 1; day <= 100; day++) {
+                let todayProfit = dailyProfit;
+                let note = '';
+                
+                // Prvý cyklus - výnimka (4 dni namiesto 5)
+                if (cycle === 1) {
+                    if (dayInCycle === 4) {
+                        note = `${cycle}. CYKLUS`;
+                    }
+                    
+                    const initialAmount = currentAmount;
+                    currentAmount += todayProfit;
+                    totalProfit += todayProfit;
+                    
+                    data.push({ day, initialAmount, todayProfit, currentAmount, note });
+                    
+                    if (dayInCycle === 4) {
+                        dailyProfit *= 2;
+                        dayInCycle = 1;
+                        cycle++;
+                    } else {
+                        dayInCycle++;
+                    }
+                } 
+                // Všetky ostatné cykly - normálne (každých 5 dní)
+                else {
+                    if (dayInCycle === 5) {
+                        note = `${cycle}. CYKLUS`;
+                    }
+                    
+                    const initialAmount = currentAmount;
+                    currentAmount += todayProfit;
+                    totalProfit += todayProfit;
+                    
+                    data.push({ day, initialAmount, todayProfit, currentAmount, note });
+                    
+                    if (dayInCycle === 5) {
+                        dailyProfit *= 2;
+                        dayInCycle = 1;
+                        cycle++;
+                    } else {
+                        dayInCycle++;
+                    }
+                }
+            }
+            
+            // Uložiť data pre automatické označovanie
+            window.tableData = data;
+            
+            // Všetky checkboxy sú zakázané - iba zobrazenie
+            const readOnlyMode = true;
+            
+            // Clear table
+            tableContainer.innerHTML = '';
+            
+            // Generate table rows
+            data.forEach((item, index) => {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'table-row';
+                const checkboxId = `checkbox-${index}`;
+                
+                rowDiv.innerHTML = `
+                    <div class="div-wrapper"><div class="DE">${item.day}</div></div>
+                    <div class="DE-wrapper"><div class="DE">${formatNumber(item.initialAmount)}€</div></div>
+                    <div class="frame-2"><div class="DE profit-text">+${formatNumber(item.todayProfit)}€</div></div>
+                    <div class="frame-3"><div class="DE">${formatNumber(item.currentAmount)}€</div></div>
+                    <div class="frame-4"><div class="DE">${item.note}</div></div>
+                    <div class="frame-5">
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="${checkboxId}" disabled style="pointer-events: none; opacity: 0.8;">
+                            <span style="color: #ffffff; font-weight: 500; text-transform: none;">V procese</span>
+                        </div>
+                    </div>
+                `;
+                
+                tableContainer.appendChild(rowDiv);
+            });
+            
+            // Add final result content (iba finálna suma)
+            const finalAmount = data[data.length - 1].currentAmount;
+            finalResultContainer.innerHTML = `
+                <div class="final-result-title">🎉 FINÁLNY VÝSLEDOK PO 100 DŇOCH</div>
+                <div class="final-amount">${formatNumber(finalAmount)}€</div>
+            `;
+        }
+        
+        // Generate table when page loads
+        window.addEventListener('load', function() {
+            generateTable();
+            
+            // Spustiť real-time aktualizácie kapitálu
+            startRealTimeUpdates();
+        });
+
+        // Backup ukladanie pri zatvorení stránky (iba ak nie je read-only)
+        window.addEventListener('beforeunload', function() {
+            if (!isReadOnlyMode()) {
+                // Uložiť aktuálne stavy všetkých checkboxov
+                document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    if (checkbox.id && !checkbox.disabled) {
+                        saveCheckboxState(checkbox.id, checkbox.checked);
+                    }
+                });
+            }
+        });
+
+        // Zabráň manipulácii cez konzolu v read-only režime
+        if (isReadOnlyMode()) {
+            // Prepiš globálne funkcie
+            window.addEventListener('load', function() {
+                setTimeout(() => {
+                    // Zablokuj prístup k checkbox elementom
+                    const originalQuerySelector = document.querySelector;
+                    const originalQuerySelectorAll = document.querySelectorAll;
+                    
+                    document.querySelector = function(selector) {
+                        const result = originalQuerySelector.call(this, selector);
+                        if (result && result.type === 'checkbox') {
+                            Object.defineProperty(result, 'checked', {
+                                get: function() { return this.hasAttribute('checked'); },
+                                set: function() { 
+                                    return false; 
+                                }
+                            });
+                        }
+                        return result;
+                    };
+                }, 100);
+            });
+        }
+
+        /*
+        🚀 NETLIFY DEPLOYMENT GUIDE:
+        
+        1. ŠTRUKTÚRA PROJEKTU:
+           minco-challenge/
+           ├── index.html (tento súbor)
+           ├── netlify.toml
+           ├── netlify/functions/capital.js
+           ├── netlify/functions/telegram-webhook.js
+           └── _headers
+        
+        2. NETLIFY FUNCTIONS ENDPOINTS:
+           - GET  /.netlify/functions/capital (získa aktuálny kapitál)
+           - POST /.netlify/functions/capital (aktualizuje kapitál z MT5)
+           - POST /.netlify/functions/telegram-webhook (Telegram webhook)
+        
+        3. ENVIRONMENT VARIABLES (v Netlify dashboard):
+           - TELEGRAM_BOT_TOKEN: váš bot token
+           - API_SECRET: tajný kľúč pre bezpečnosť
+           - URL: https://your-site.netlify.app
+        
+        4. METATRADER5 SETUP:
+           - Nainštalujte MT5_Netlify_Sender.mq5 expert advisor
+           - Nastavte TelegramBotToken a ChatID
+           - Expert pošle equity každých 60 sekúnd do Telegram
+           - Telegram webhook automaticky aktualizuje Netlify function
+        
+        5. DEPLOYMENT:
+           - Push kód na GitHub
+           - Pripojte GitHub repo k Netlify
+           - Nastavte environment variables
+           - Deploy je automatický!
+        
+        6. MONITORING:
+           - Netlify Functions logs pre debugging
+           - Real-time kapitál sa aktualizuje každých 5 sekúnd
+           - Demo režim pre localhost, produkčný režim pre deployed site
+        
+        Celé riešenie je 100% ZADARMO na Netlify free tier! 🎯
+        */
+    </script>
+</body>
+</html>
