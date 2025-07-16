@@ -20,8 +20,8 @@ exports.handler = async (event, context) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
+    console.log('Received webhook:', JSON.stringify(body, null, 2));
     
-    // Validácia Telegram webhook
     if (!body.message || !body.message.text) {
       return {
         statusCode: 400,
@@ -32,19 +32,23 @@ exports.handler = async (event, context) => {
 
     const message = body.message.text;
     const chatId = body.message.chat.id;
+    console.log('Processing message:', message);
 
-    // Spracovanie MT5 údajov
-    // Nový formát: "EQUITY:25.50|DAILY:2.30|LIVE:-1.20|STATUS:EUR/USD Long"
+    // Spracovanie MT5 údajov vo formáte: "EQUITY:91.86|DAILY:0.08|LIVE:-0.11|STATUS:EURUSD Long"
     if (message.startsWith('EQUITY:')) {
       const parts = message.split('|');
+      console.log('Message parts:', parts);
+      
       const equity = parseFloat(parts[0].split(':')[1]);
       const daily = parts[1] ? parseFloat(parts[1].split(':')[1]) : 0;
       const live = parts[2] ? parseFloat(parts[2].split(':')[1]) : 0;
-      const status = parts[3] ? parts[3].split(':')[1] : 'Trading aktívny';
+      const status = parts[3] ? parts[3].split(':')[1].trim() : 'No positions';
+      
+      console.log('Parsed values:', { equity, daily, live, status });
       
       if (!isNaN(equity)) {
         // Aktualizovať kapitál cez našu API
-        const updateResponse = await fetch(`${process.env.URL}/.netlify/functions/capital`, {
+        const updateResponse = await fetch(`${process.env.SITE_URL}/.netlify/functions/capital`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -57,9 +61,14 @@ exports.handler = async (event, context) => {
         });
 
         if (updateResponse.ok) {
+          console.log('Capital updated successfully');
           // Odošlať potvrdenie do Telegram
-          await sendTelegramMessage(chatId, `✅ Kapitál: ${equity}€\n💰 Live: ${live >= 0 ? '+' : ''}${live}€`);
+          await sendTelegramMessage(chatId, `✅ Capital: ${equity}€\n💰 Live: ${live >= 0 ? '+' : ''}${live}€\n📊 Status: ${status}`);
+        } else {
+          console.error('Failed to update capital:', updateResponse.status);
         }
+      } else {
+        console.error('Invalid equity value:', equity);
       }
     }
 
