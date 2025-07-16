@@ -10,6 +10,8 @@ let capitalData = {
 
 // Hlavná funkcia pre API endpoint
 exports.handler = async (event, context) => {
+  console.log('Capital API called:', event.httpMethod);
+  
   // CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -42,7 +44,7 @@ exports.handler = async (event, context) => {
     }
 
     if (event.httpMethod === 'POST') {
-      // Aktualizovať dáta (z Telegram botu)
+      // Aktualizovať dáta (z live-sync alebo iných zdrojov)
       const body = JSON.parse(event.body || '{}');
       
       // Validácia
@@ -63,6 +65,8 @@ exports.handler = async (event, context) => {
         capitalData.liveTradeProfit = body.liveTradeProfit !== undefined ? parseFloat(body.liveTradeProfit) : 0;
         capitalData.tradingStatus = body.tradingStatus || (capitalData.liveTradeProfit !== 0 ? 'Trading active' : 'No positions');
         capitalData.lastUpdate = new Date().toISOString();
+        
+        console.log('Capital data updated:', capitalData);
       }
 
       return {
@@ -82,7 +86,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Capital API error:', error);
     return {
       statusCode: 500,
       headers,
