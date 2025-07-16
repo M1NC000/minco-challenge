@@ -905,7 +905,7 @@
                 const data = await response.json();
                 
                 // Ak je production, použij skutočné dáta
-                if (API_CONFIG.isProduction && data.status === 'success') {
+                if (data.status === 'success') {
                     currentCapitalData = {
                         amount: data.amount || 15,
                         dailyProfit: data.dailyProfit || 0,
