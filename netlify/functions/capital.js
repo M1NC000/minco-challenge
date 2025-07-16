@@ -1,12 +1,10 @@
-const { schedule } = require('@netlify/functions');
-
 // Automatické dáta (aktualizované z MT5)
 let capitalData = {
   amount: 15.00,
   dailyProfit: 0,
   totalProfit: 0,
   liveTradeProfit: 0,
-  tradingStatus: 'Žiadne pozície',
+  tradingStatus: 'No positions',
   lastUpdate: new Date().toISOString()
 };
 
@@ -63,7 +61,7 @@ exports.handler = async (event, context) => {
         capitalData.dailyProfit = body.dailyProfit !== undefined ? parseFloat(body.dailyProfit) : capitalData.amount - oldAmount;
         capitalData.totalProfit = capitalData.amount - 15; // 15€ je štartovacia suma
         capitalData.liveTradeProfit = body.liveTradeProfit !== undefined ? parseFloat(body.liveTradeProfit) : 0;
-        capitalData.tradingStatus = body.tradingStatus || (capitalData.liveTradeProfit !== 0 ? 'Trading aktívny' : 'Žiadne pozície');
+        capitalData.tradingStatus = body.tradingStatus || (capitalData.liveTradeProfit !== 0 ? 'Trading active' : 'No positions');
         capitalData.lastUpdate = new Date().toISOString();
       }
 
@@ -92,16 +90,3 @@ exports.handler = async (event, context) => {
     };
   }
 };
-
-// Scheduled function (volá sa každých 5 minút)
-exports.scheduledHandler = schedule('*/5 * * * *', async (event, context) => {
-  console.log('Scheduled update check:', new Date().toISOString());
-  
-  // Tu môžete pridať logiku pre pravidelné aktualizácie
-  // Napríklad kontrola MT5 API alebo iných zdrojov
-  
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: 'Scheduled update completed' })
-  };
-});
