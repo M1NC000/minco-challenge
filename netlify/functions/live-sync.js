@@ -18,27 +18,7 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // Ak máme uložené posledné platné dáta, vráť ich
-      if (lastValidData) {
-        console.log('Returning last valid data:', lastValidData);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            amount: lastValidData.equity,
-            dailyProfit: lastValidData.daily,
-            totalProfit: lastValidData.equity - 15,
-            liveTradeProfit: lastValidData.live,
-            tradingStatus: lastValidData.status,
-            lastUpdate: lastValidData.lastUpdate,
-            status: 'success',
-            timestamp: Date.now(),
-            dataSource: 'cached' // Indikuje že sú to uložené dáta
-          })
-        };
-      }
-      
-      // Ak máme aktuálne live dáta, vráť ich
+      // Ak máme aktuálne live dáta, vráť ich (priorita)
       if (liveData) {
         console.log('Returning current live data:', liveData);
         return {
@@ -58,8 +38,28 @@ exports.handler = async (event, context) => {
         };
       }
       
-      // Ak nie sú žiadne dáta, vráť štartové hodnoty (len prvý krát)
-      console.log('No data available, returning initial values');
+      // Ak máme uložené posledné platné dáta, vráť ich (backup po odpojení)
+      if (lastValidData) {
+        console.log('Returning last valid data (MT5 disconnected):', lastValidData);
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            amount: lastValidData.equity,
+            dailyProfit: lastValidData.daily,
+            totalProfit: lastValidData.equity - 15,
+            liveTradeProfit: lastValidData.live,
+            tradingStatus: lastValidData.status,
+            lastUpdate: lastValidData.lastUpdate,
+            status: 'success',
+            timestamp: Date.now(),
+            dataSource: 'cached'
+          })
+        };
+      }
+      
+      // Ak nie sú VÔBEC žiadne dáta (prvé spustenie), vráť štartové hodnoty
+      console.log('No data available - first run, returning initial values');
       return {
         statusCode: 200,
         headers,
