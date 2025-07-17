@@ -1,16 +1,17 @@
-// Automatické dáta (aktualizované z MT5)
+// PERZISTENTNÉ dáta (uložené aj po reštarte funkcie)
 let capitalData = {
   amount: 15.00,
   dailyProfit: 0,
   totalProfit: 0,
   liveTradeProfit: 0,
   tradingStatus: 'No positions',
-  lastUpdate: new Date().toISOString()
+  lastUpdate: new Date().toISOString(),
+  hasReceivedMT5Data: false // Flag či už boli prijaté dáta z MT5
 };
 
 // Hlavná funkcia pre API endpoint
 exports.handler = async (event, context) => {
-  console.log('Capital API called:', event.httpMethod);
+  console.log('Capital API called:', event.httpMethod, 'Current data:', capitalData);
   
   // CORS headers
   const headers = {
@@ -31,14 +32,16 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // Vrátiť aktuálne dáta
+      // VŽDY vráti aktuálne uložené dáta (nikdy sa nevráti na štartové)
+      console.log('Returning capital data:', capitalData);
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
           ...capitalData,
           status: 'success',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          dataSource: capitalData.hasReceivedMT5Data ? 'persistent' : 'initial'
         })
       };
     }
@@ -46,9 +49,11 @@ exports.handler = async (event, context) => {
     if (event.httpMethod === 'POST') {
       // Aktualizovať dáta (z live-sync alebo iných zdrojov)
       const body = JSON.parse(event.body || '{}');
+      console.log('POST request body:', body);
       
-      // Validácia
+      // Validácia secret kľúča
       if (body.secret !== process.env.API_SECRET) {
+        console.log('Unauthorized access attempt');
         return {
           statusCode: 401,
           headers,
@@ -58,15 +63,17 @@ exports.handler = async (event, context) => {
 
       // Aktualizovať kapitál a live trade údaje
       if (body.amount !== undefined) {
-        const oldAmount = capitalData.amount;
+        const oldData = { ...capitalData };
+        
         capitalData.amount = parseFloat(body.amount);
-        capitalData.dailyProfit = body.dailyProfit !== undefined ? parseFloat(body.dailyProfit) : capitalData.amount - oldAmount;
+        capitalData.dailyProfit = body.dailyProfit !== undefined ? parseFloat(body.dailyProfit) : 0;
         capitalData.totalProfit = capitalData.amount - 15; // 15€ je štartovacia suma
         capitalData.liveTradeProfit = body.liveTradeProfit !== undefined ? parseFloat(body.liveTradeProfit) : 0;
         capitalData.tradingStatus = body.tradingStatus || (capitalData.liveTradeProfit !== 0 ? 'Trading active' : 'No positions');
         capitalData.lastUpdate = new Date().toISOString();
+        capitalData.hasReceivedMT5Data = true; // Označí že už boli prijaté dáta z MT5
         
-        console.log('Capital data updated:', capitalData);
+        console.log('Capital data updated:', { old: oldData, new: capitalData });
       }
 
       return {
