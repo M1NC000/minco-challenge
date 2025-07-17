@@ -66,10 +66,27 @@ exports.handler = async (event, context) => {
         const oldData = { ...capitalData };
         
         capitalData.amount = parseFloat(body.amount);
-        capitalData.dailyProfit = body.dailyProfit !== undefined ? parseFloat(body.dailyProfit) : 0;
+        
+        // DENNÝ ZISK - zachová starú hodnotu ak nepríde nová
+        if (body.dailyProfit !== undefined && body.dailyProfit !== null) {
+          capitalData.dailyProfit = parseFloat(body.dailyProfit);
+        }
+        // Ak nepríde dailyProfit, ZACHOVÁ starú hodnotu (neresetnúť na 0)
+        
         capitalData.totalProfit = capitalData.amount - 15; // 15€ je štartovacia suma
-        capitalData.liveTradeProfit = body.liveTradeProfit !== undefined ? parseFloat(body.liveTradeProfit) : 0;
-        capitalData.tradingStatus = body.tradingStatus || (capitalData.liveTradeProfit !== 0 ? 'Trading active' : 'No positions');
+        
+        // LIVE TRADE PROFIT - zachová starú hodnotu ak nepríde nová
+        if (body.liveTradeProfit !== undefined && body.liveTradeProfit !== null) {
+          capitalData.liveTradeProfit = parseFloat(body.liveTradeProfit);
+        }
+        // Ak nepríde liveTradeProfit, ZACHOVÁ starú hodnotu
+        
+        // TRADING STATUS - zachová starý ak nepríde nový
+        if (body.tradingStatus !== undefined && body.tradingStatus !== null && body.tradingStatus !== '') {
+          capitalData.tradingStatus = body.tradingStatus;
+        }
+        // Ak nepríde tradingStatus, ZACHOVÁ starý
+        
         capitalData.lastUpdate = new Date().toISOString();
         capitalData.hasReceivedMT5Data = true; // Označí že už boli prijaté dáta z MT5
         
