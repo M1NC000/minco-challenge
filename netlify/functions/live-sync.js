@@ -1,20 +1,8 @@
-// AUTOMATIC live-sync API - Priamo z automatického MT5 systému
-// Pamätá si posledné hodnoty aj po vypnutí MT5
-
-let automaticData = {
-  equity: 15.00,
-  dailyProfit: 0,
-  totalProfit: 0,
-  liveProfit: 0,
-  status: 'No positions',
-  lastUpdate: new Date().toISOString(),
-  hasReceivedData: false,
-  lastUpdateTimestamp: 0,
-  isLive: false // Indikuje či sú dáta live z MT5
-};
+// SIMPLE PROXY live-sync - Všetko presmeruje na capital.js
+// Neuchováva ŽIADNE dáta, len spracováva a presmerováva
 
 exports.handler = async (event, context) => {
-  console.log('🚀 AUTOMATIC Live-sync called:', event.httpMethod, new Date().toISOString());
+  console.log('🔄 PROXY Live-sync called:', event.httpMethod);
   
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -29,34 +17,53 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // Vráti aktuálne automatické dáta
-      console.log('📊 Returning automatic data:', automaticData);
+      // PROXY - presmeruj na capital API
+      console.log('🔄 Proxying GET request to capital API');
       
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          amount: automaticData.equity,
-          dailyProfit: automaticData.dailyProfit,
-          totalProfit: automaticData.totalProfit,
-          liveTradeProfit: automaticData.liveProfit,
-          tradingStatus: automaticData.status,
-          lastUpdate: automaticData.lastUpdate,
-          isLive: automaticData.isLive,
-          status: 'success',
-          timestamp: Date.now(),
-          dataSource: automaticData.hasReceivedData ? 'mt5_automatic' : 'initial'
-        })
-      };
+      try {
+        const capitalResponse = await fetch('https://minco.netlify.app/.netlify/functions/capital', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (capitalResponse.ok) {
+          const capitalData = await capitalResponse.json();
+          console.log('🔄 Retrieved from capital API:', capitalData);
+          
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              amount: capitalData.amount,
+              dailyProfit: capitalData.dailyProfit,
+              totalProfit: capitalData.totalProfit,
+              liveTradeProfit: capitalData.liveTradeProfit,
+              tradingStatus: capitalData.tradingStatus,
+              lastUpdate: capitalData.lastUpdate,
+              status: 'success',
+              timestamp: Date.now(),
+              dataSource: 'proxy_to_capital'
+            })
+          };
+        } else {
+          throw new Error(`Capital API returned ${capitalResponse.status}`);
+        }
+      } catch (error) {
+        console.error('🔄 Error proxying to capital API:', error);
+        return {
+          statusCode: 500,
+          headers,
+          body: JSON.stringify({ error: 'Failed to fetch from capital API' })
+        };
+      }
     }
 
     if (event.httpMethod === 'POST') {
+      // PROXY - spracuj a presmeruj na capital API
       const body = JSON.parse(event.body || '{}');
-      console.log('📥 Received automatic data from MT5:', body);
+      console.log('🔄 Proxying POST data to capital API:', body);
       
-      // Validácia dát z automatického MT5
       if (body.equity === undefined) {
-        console.log('❌ Missing equity data');
         return {
           statusCode: 400,
           headers,
@@ -64,62 +71,28 @@ exports.handler = async (event, context) => {
         };
       }
 
-      const now = Date.now();
-      const oldData = { ...automaticData };
-      
-      // Automatic anti-spam - kratší interval pre real-time (2 sekundy)
-      if (automaticData.hasReceivedData && (now - automaticData.lastUpdateTimestamp) < 2000) {
-        console.log('⚠️ Automatic update too frequent, ignoring');
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({ 
-            message: 'Automatic update ignored - too frequent',
-            data: automaticData
-          })
-        };
+      // Priprav dáta pre capital API
+      const capitalPayload = {
+        amount: parseFloat(body.equity),
+        secret: process.env.API_SECRET
+      };
+
+      // Pridaj ostatné dáta ak sú dostupné
+      if (body.dailyProfit !== undefined && !isNaN(parseFloat(body.dailyProfit))) {
+        capitalPayload.dailyProfit = parseFloat(body.dailyProfit);
       }
 
-      // Aktualizuj automatické dáta
-      automaticData.equity = parseFloat(body.equity);
-      automaticData.dailyProfit = parseFloat(body.dailyProfit) || 0;
-      automaticData.totalProfit = parseFloat(body.totalProfit) || (automaticData.equity - 15);
-      automaticData.liveProfit = parseFloat(body.liveProfit) || 0;
-      automaticData.status = body.status || 'No positions';
-      automaticData.lastUpdate = new Date().toISOString();
-      automaticData.lastUpdateTimestamp = now;
-      automaticData.hasReceivedData = true;
-      automaticData.isLive = true;
+      if (body.liveProfit !== undefined && !isNaN(parseFloat(body.liveProfit))) {
+        capitalPayload.liveTradeProfit = parseFloat(body.liveProfit);
+      }
 
-      // Nastavenie live timeout - ak nepríde update do 30 sekúnd, nie je live
-      setTimeout(() => {
-        if ((Date.now() - automaticData.lastUpdateTimestamp) > 30000) {
-          automaticData.isLive = false;
-          console.log('⚠️ MT5 connection appears offline');
-        }
-      }, 30000);
+      if (body.status && body.status.trim() !== '') {
+        capitalPayload.tradingStatus = body.status;
+      }
 
-      console.log('✅ Automatic data updated:', {
-        old: oldData,
-        new: automaticData,
-        changes: {
-          equity: Math.abs(automaticData.equity - oldData.equity),
-          daily: Math.abs(automaticData.dailyProfit - oldData.dailyProfit),
-          live: Math.abs(automaticData.liveProfit - oldData.liveProfit),
-          status: automaticData.status !== oldData.status
-        }
-      });
+      console.log('🔄 Sending to capital API:', capitalPayload);
 
-      // Aktualizuj aj capital API pre kompatibilitu
       try {
-        const capitalPayload = {
-          amount: automaticData.equity,
-          dailyProfit: automaticData.dailyProfit,
-          liveTradeProfit: automaticData.liveProfit,
-          tradingStatus: automaticData.status,
-          secret: process.env.API_SECRET
-        };
-
         const capitalResponse = await fetch('https://minco.netlify.app/.netlify/functions/capital', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -127,24 +100,29 @@ exports.handler = async (event, context) => {
         });
 
         if (capitalResponse.ok) {
-          console.log('📊 Capital API auto-synced successfully');
+          const result = await capitalResponse.json();
+          console.log('🔄 Capital API updated successfully');
+          
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              success: true,
+              message: 'Data proxied to capital API successfully',
+              data: result.data
+            })
+          };
         } else {
-          console.log('⚠️ Capital API auto-sync failed:', capitalResponse.status);
+          throw new Error(`Capital API returned ${capitalResponse.status}`);
         }
       } catch (error) {
-        console.log('⚠️ Capital API auto-sync error:', error.message);
+        console.error('🔄 Error updating capital API:', error);
+        return {
+          statusCode: 500,
+          headers,
+          body: JSON.stringify({ error: 'Failed to update capital API' })
+        };
       }
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          message: 'Automatic data updated successfully',
-          data: automaticData,
-          previousData: oldData
-        })
-      };
     }
 
     return {
@@ -154,7 +132,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('❌ Automatic live-sync error:', error);
+    console.error('🔄 Proxy live-sync error:', error);
     return {
       statusCode: 500,
       headers,
