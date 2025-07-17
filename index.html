@@ -1,43 +1,4 @@
-        /*
-        🚀 NETLIFY DEPLOYMENT GUIDE - AUTOMATICKÉ RIEŠENIE:
-        
-        1. AUTOMATICKÉ FUNKCIE:
-           ✅ Kapitál sa aktualizuje automaticky z MT5
-           ✅ Dni sa označujú automaticky na základe kapitálu  
-           ✅ Live trade informácie (profit/loss z otvorených pozícií)
-           ✅ Žiadne manuálne checkboxy - všetko automatické
-        
-        2. API ENDPOINT (/api/capital):
-           {
-               "amount": 25.50,           // Aktuálny kapitál
-               "dailyProfit": 2.30,       // Denný zisk/strata
-               "totalProfit": 10.50,      // Celkový profit od začiatku
-               "liveTradeProfit": -1.20,  // Aktuálny floating P&L
-               "tradingStatus": "EUR/USD Long", // Status obchodu
-               "lastUpdate": "2025-07-16T10:30:00Z"
-           }
-        
-        3. AUTOMATICKÉ OZNAČOVANIE:
-           - Ak kapitál = 22€ → dni 1-4 označené ako HOTOVO
-           - Ak kapitál = 45€ → dni 1-8 označené ako HOTOVO
-           - Označuje sa vždy od vrchu nadol na základe dosiahnutej sumy
-        
-        4. LIVE TRADE SEKCIA:
-           - Namiesto "NÁSOBENIE" → "LIVE TRADE"
-           - Zobrazuje aktuálny floating profit/loss
-           - Zelená farba pre profit, červená pre loss
-           - Ak nie sú pozície → "Žiadne pozície"
-        
-        5. MT5 SCRIPT AKTUALIZÁCIA:
-           Pošle tieto údaje cez Telegram:
-           "EQUITY:25.50|DAILY:2.30|LIVE:-1.20|STATUS:EUR/USD Long"
-        
-        6. DEPLOYMENT:
-           - Všetko kompletne automatické
-           - Žiadne manuálne ovládanie
-           - Real-time aktualizácie každých 5 sekúnd
-           - 100% zadarmo na Netlify
-        */ <!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -115,6 +76,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: flex-start;
             padding: 2rem 1rem;
             z-index: 2;
         }
@@ -139,7 +101,7 @@
             letter-spacing: 0.5px;
             line-height: normal;
             margin-bottom: 0.5rem;
-            margin-top: 150px;
+            margin-top: 2rem;
             text-rendering: optimizeLegibility;
             text-transform: uppercase;
         }
@@ -559,6 +521,7 @@
         @media (max-width: 1200px) {
             .desktop {
                 padding: 1.5rem 0.75rem;
+                justify-content: flex-start;
             }
             
             .table-container {
@@ -574,6 +537,11 @@
         @media (max-width: 768px) {
             .desktop {
                 padding: 1rem 0.5rem;
+                justify-content: flex-start;
+            }
+            
+            .subtitle-small {
+                margin-top: 1rem;
             }
             
             .table-container {
@@ -608,6 +576,11 @@
         @media (max-width: 480px) {
             .desktop {
                 padding: 0.75rem 0.25rem;
+                justify-content: flex-start;
+            }
+            
+            .subtitle-small {
+                margin-top: 0.5rem;
             }
             
             .final-result {
@@ -698,10 +671,9 @@
     <script>
         // Konfigurácia pre Netlify API
         const API_CONFIG = {
-            endpoint: '/.netlify/functions/live-sync', 
-            updateInterval: 2000,  
-            isProduction: true     
-
+            endpoint: '/.netlify/functions/live-sync',
+            updateInterval: 2000,
+            isProduction: true
         };
 
         // Globálne premenné pre kapitál
@@ -720,7 +692,7 @@
                 maximumFractionDigits: decimals 
             }).format(number);
         }
-
+        
         function formatTime(date) {
             return date.toLocaleTimeString('sk-SK', { 
                 hour: '2-digit', 
@@ -762,6 +734,47 @@
             }
             
             requestAnimationFrame(update);
+        }
+
+        // Automatické označenie splnených dní na základe kapitálu
+        function updateCompletedDays(currentCapital) {
+            if (!window.tableData) return;
+            
+            // Nájdi najvyšší deň, ktorý je dosiahnutý aktuálnym kapitálom
+            let completedDayIndex = -1;
+            
+            for (let i = 0; i < window.tableData.length; i++) {
+                if (currentCapital >= window.tableData[i].currentAmount) {
+                    completedDayIndex = i;
+                } else {
+                    break; // Zastav ak kapitál nie je dosť vysoký
+                }
+            }
+            
+            // Aktualizuj checkboxy - všetky do completedDayIndex označené, ostatné nie
+            document.querySelectorAll('input[type="checkbox"]').forEach((checkbox, index) => {
+                const span = checkbox.nextElementSibling;
+                const row = checkbox.closest('.table-row');
+                const shouldBeCompleted = index <= completedDayIndex;
+                
+                if (shouldBeCompleted !== checkbox.checked) {
+                    checkbox.checked = shouldBeCompleted;
+                    
+                    if (shouldBeCompleted) {
+                        span.textContent = 'HOTOVO';
+                        span.style.color = '#00ff88';
+                        span.style.fontWeight = '700';
+                        span.style.textTransform = 'uppercase';
+                        row.classList.add('completed');
+                    } else {
+                        span.textContent = 'V procese';
+                        span.style.color = '#ffffff';
+                        span.style.fontWeight = '500';
+                        span.style.textTransform = 'none';
+                        row.classList.remove('completed');
+                    }
+                }
+            });
         }
 
         // Funkcia na aktualizáciu kapitálu v UI
@@ -833,46 +846,6 @@
             updateCompletedDays(data.amount);
         }
 
-        // Automatické označenie splnených dní na základe kapitálu
-        function updateCompletedDays(currentCapital) {
-            if (!window.tableData) return;
-            
-            // Nájdi najvyšší deň, ktorý je dosiahnutý aktuálnym kapitálom
-            let completedDayIndex = -1;
-            
-            for (let i = 0; i < window.tableData.length; i++) {
-                if (currentCapital >= window.tableData[i].currentAmount) {
-                    completedDayIndex = i;
-                } else {
-                    break; // Zastav ak kapitál nie je dosť vysoký
-                }
-            }
-            
-            // Aktualizuj checkboxy - všetky do completedDayIndex označené, ostatné nie
-            document.querySelectorAll('input[type="checkbox"]').forEach((checkbox, index) => {
-                const span = checkbox.nextElementSibling;
-                const row = checkbox.closest('.table-row');
-                const shouldBeCompleted = index <= completedDayIndex;
-                
-                if (shouldBeCompleted !== checkbox.checked) {
-                    checkbox.checked = shouldBeCompleted;
-                    
-                    if (shouldBeCompleted) {
-                        span.textContent = 'HOTOVO';
-                        span.style.color = '#00ff88';
-                        span.style.fontWeight = '700';
-                        span.style.textTransform = 'uppercase';
-                        row.classList.add('completed');
-                    } else {
-                        span.textContent = 'V procese';
-                        span.style.color = '#ffffff';
-                        span.style.fontWeight = '500';
-                        span.style.textTransform = 'none';
-                        row.classList.remove('completed');
-                    }
-                }
-            });
-        }
         // Simulácia dat pre demo (odstráňte v produkčnom prostredí)
         function generateDemoData() {
             const variation = (Math.random() - 0.5) * 10; // ±5€ variácia
@@ -955,145 +928,6 @@
             
             // Pravidelné aktualizácie
             setInterval(fetchCapitalData, API_CONFIG.updateInterval);
-        }
-
-        // Funkcia na zistenie najvyššieho splneného dňa
-        function getHighestCompletedDay() {
-            const savedStates = loadCheckboxStates();
-            let highestDay = 0;
-            
-            for (let i = 0; i < 100; i++) {
-                const checkboxId = `checkbox-${i}`;
-                if (savedStates[checkboxId]) {
-                    highestDay = i + 1;
-                }
-            }
-            
-            return highestDay;
-        }
-
-        // Funkcia na generovanie zdieľateľného linku
-        function generateShareLink() {
-            const highestDay = getHighestCompletedDay();
-            if (highestDay === 0) {
-                alert('Zatiaľ nemáte splnený žiadny deň!');
-                return;
-            }
-            
-            const baseUrl = window.location.href.split('?')[0];
-            const shareUrl = `${baseUrl}?day=${highestDay}`;
-            
-            // Skopírovať do schránky
-            navigator.clipboard.writeText(shareUrl).then(() => {
-                alert(`Link skopírovaný do schránky!\nZdieľateľný progres po ${highestDay}. deň`);
-            }).catch(() => {
-                // Fallback pre staršie prehliadače
-                prompt('Skopírujte tento link:', shareUrl);
-            });
-        }
-
-        // Funkcia na zobrazenie progresu len po určitý deň
-        function getProgressForDay(dayLimit) {
-            const progress = {};
-            for (let i = 0; i < dayLimit && i < 100; i++) {
-                progress[`checkbox-${i}`] = true;
-            }
-            return progress;
-        }
-
-        // Funkcia na detekciu read-only režimu
-        function isReadOnlyMode() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const dayParam = urlParams.get('day');
-            return dayParam && parseInt(dayParam) > 0;
-        }
-
-        // Funkcia na získanie dňa z URL
-        function getDayFromUrl() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const dayParam = urlParams.get('day');
-            return dayParam ? parseInt(dayParam) : 0;
-        }
-
-        // Zabezpečenie read-only režimu
-        function enforceReadOnlyMode() {
-            if (isReadOnlyMode()) {
-                // Odstráň všetky event listenery pre checkboxy
-                document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                    checkbox.disabled = true;
-                    checkbox.style.pointerEvents = 'none';
-                    checkbox.style.opacity = '0.7';
-                    
-                    // Odstráň všetky existujúce event listenery
-                    const newCheckbox = checkbox.cloneNode(true);
-                    checkbox.parentNode.replaceChild(newCheckbox, checkbox);
-                });
-                
-                // Zabráň všetkým pokusom o zmenu cez JavaScript
-                Object.defineProperty(window, 'saveCheckboxState', {
-                    value: function() { 
-                        return false; 
-                    },
-                    writable: false,
-                    configurable: false
-                });
-                
-                // Zablokuj localStorage zmeny
-                const originalSetItem = localStorage.setItem;
-                localStorage.setItem = function(key, value) {
-                    if (key === 'mincoCheckboxStates') {
-                        return false;
-                    }
-                    return originalSetItem.call(this, key, value);
-                };
-                
-                // Pridaj informačný text s dňom
-                const dayLimit = getDayFromUrl();
-                const infoDiv = document.createElement('div');
-                infoDiv.style.cssText = `
-                    position: fixed;
-                    top: 10px;
-                    right: 10px;
-                    background: rgba(255, 255, 255, 0.1);
-                    border: 1px solid #ffffff40;
-                    color: #ffffff;
-                    padding: 10px 15px;
-                    border-radius: 8px;
-                    font-family: 'Inter', Helvetica;
-                    font-size: 12px;
-                    font-weight: 500;
-                    z-index: 1000;
-                    backdrop-filter: blur(10px);
-                `;
-                infoDiv.textContent = `👁️ Progres po ${dayLimit}. deň - iba na zobrazenie`;
-                document.body.appendChild(infoDiv);
-                
-                console.log('Read-only režim aktivovaný - všetky zmeny sú zakázané');
-            }
-        }
-
-        function saveCheckboxState(checkboxId, isChecked) {
-            // Zabráň ukladaniu v read-only režime
-            if (isReadOnlyMode()) {
-                return false;
-            }
-            
-            try {
-                const savedStates = JSON.parse(localStorage.getItem('mincoCheckboxStates') || '{}');
-                savedStates[checkboxId] = isChecked;
-                localStorage.setItem('mincoCheckboxStates', JSON.stringify(savedStates));
-            } catch (error) {
-                // Tichý error handling
-            }
-        }
-
-        function loadCheckboxStates() {
-            try {
-                const savedStates = JSON.parse(localStorage.getItem('mincoCheckboxStates') || '{}');
-                return savedStates;
-            } catch (error) {
-                return {};
-            }
         }
 
         function generateTable() {
@@ -1201,84 +1035,6 @@
             // Spustiť real-time aktualizácie kapitálu
             startRealTimeUpdates();
         });
-
-        // Backup ukladanie pri zatvorení stránky (iba ak nie je read-only)
-        window.addEventListener('beforeunload', function() {
-            if (!isReadOnlyMode()) {
-                // Uložiť aktuálne stavy všetkých checkboxov
-                document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                    if (checkbox.id && !checkbox.disabled) {
-                        saveCheckboxState(checkbox.id, checkbox.checked);
-                    }
-                });
-            }
-        });
-
-        // Zabráň manipulácii cez konzolu v read-only režime
-        if (isReadOnlyMode()) {
-            // Prepiš globálne funkcie
-            window.addEventListener('load', function() {
-                setTimeout(() => {
-                    // Zablokuj prístup k checkbox elementom
-                    const originalQuerySelector = document.querySelector;
-                    const originalQuerySelectorAll = document.querySelectorAll;
-                    
-                    document.querySelector = function(selector) {
-                        const result = originalQuerySelector.call(this, selector);
-                        if (result && result.type === 'checkbox') {
-                            Object.defineProperty(result, 'checked', {
-                                get: function() { return this.hasAttribute('checked'); },
-                                set: function() { 
-                                    return false; 
-                                }
-                            });
-                        }
-                        return result;
-                    };
-                }, 100);
-            });
-        }
-
-        /*
-        🚀 NETLIFY DEPLOYMENT GUIDE:
-        
-        1. ŠTRUKTÚRA PROJEKTU:
-           minco-challenge/
-           ├── index.html (tento súbor)
-           ├── netlify.toml
-           ├── netlify/functions/capital.js
-           ├── netlify/functions/telegram-webhook.js
-           └── _headers
-        
-        2. NETLIFY FUNCTIONS ENDPOINTS:
-           - GET  /.netlify/functions/capital (získa aktuálny kapitál)
-           - POST /.netlify/functions/capital (aktualizuje kapitál z MT5)
-           - POST /.netlify/functions/telegram-webhook (Telegram webhook)
-        
-        3. ENVIRONMENT VARIABLES (v Netlify dashboard):
-           - TELEGRAM_BOT_TOKEN: váš bot token
-           - API_SECRET: tajný kľúč pre bezpečnosť
-           - URL: https://your-site.netlify.app
-        
-        4. METATRADER5 SETUP:
-           - Nainštalujte MT5_Netlify_Sender.mq5 expert advisor
-           - Nastavte TelegramBotToken a ChatID
-           - Expert pošle equity každých 60 sekúnd do Telegram
-           - Telegram webhook automaticky aktualizuje Netlify function
-        
-        5. DEPLOYMENT:
-           - Push kód na GitHub
-           - Pripojte GitHub repo k Netlify
-           - Nastavte environment variables
-           - Deploy je automatický!
-        
-        6. MONITORING:
-           - Netlify Functions logs pre debugging
-           - Real-time kapitál sa aktualizuje každých 5 sekúnd
-           - Demo režim pre localhost, produkčný režim pre deployed site
-        
-        Celé riešenie je 100% ZADARMO na Netlify free tier! 🎯
-        */
     </script>
 </body>
 </html>
