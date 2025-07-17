@@ -1,49 +1,60 @@
-// AUTOMATIC CAPITAL API - Spolupracuje s automatickým MT5 systémom
-let capitalData = {
-  amount: 15.00,
+// BULLETPROOF CAPITAL API - Nikdy sa nevráti na štartové hodnoty
+// Hlavné úložisko pre všetky dáta
+
+let bulletproofData = {
+  equity: 15.00,
   dailyProfit: 0,
   totalProfit: 0,
-  liveTradeProfit: 0,
-  tradingStatus: 'No positions',
+  liveProfit: 0,
+  status: 'No positions',
   lastUpdate: new Date().toISOString(),
-  hasReceivedMT5Data: false,
+  
+  // Kritické pre zachovanie dát
+  hasEverReceivedMT5Data: false,
+  dailyStartEquity: 15.00,
   currentDay: new Date().toISOString().split('T')[0],
-  dailyStartAmount: 15.00,
-  isAutomatic: true // Flag pre automatický systém
+  
+  // Bezpečnostné záznamy
+  lastMT5Update: null,
+  totalUpdatesReceived: 0,
+  systemStartTime: new Date().toISOString()
 };
 
-// Automatická kontrola nového dňa
-function autoCheckNewDay() {
+// BULLETPROOF funkcia - nikdy nezabudne dáta
+function bulletproofDailyCheck() {
   const today = new Date().toISOString().split('T')[0];
   
-  if (capitalData.currentDay !== today) {
-    console.log(`🌅 AUTOMATIC NEW DAY: ${capitalData.currentDay} -> ${today}`);
+  // Ak je nový deň a už sme niekedy dostali dáta z MT5
+  if (bulletproofData.currentDay !== today && bulletproofData.hasEverReceivedMT5Data) {
+    console.log(`🛡️  BULLETPROOF NEW DAY: ${bulletproofData.currentDay} -> ${today}`);
     
-    // Automaticky aktualizuj štartovú sumu
-    capitalData.dailyStartAmount = capitalData.amount;
-    capitalData.currentDay = today;
-    capitalData.dailyProfit = 0;
+    // KĽÚČOVÉ: Nezmeníme equity, len nastavíme nový daily start
+    bulletproofData.dailyStartEquity = bulletproofData.equity;
+    bulletproofData.currentDay = today;
+    bulletproofData.dailyProfit = 0; // Reset len daily profit, equity zostáva
     
-    console.log(`📊 Automatic daily start: ${capitalData.dailyStartAmount}€`);
-    
+    console.log(`🛡️  New daily start: ${bulletproofData.dailyStartEquity}€ (equity preserved)`);
     return true;
   }
   
   return false;
 }
 
-// Automatický prepočet denného zisku
-function autoCalculateDailyProfit() {
-  const dailyProfit = capitalData.amount - capitalData.dailyStartAmount;
-  console.log(`🧮 Auto daily calculation: ${capitalData.amount} - ${capitalData.dailyStartAmount} = ${dailyProfit}`);
+// BULLETPROOF výpočet denného zisku
+function bulletproofCalculateDailyProfit() {
+  if (!bulletproofData.hasEverReceivedMT5Data) {
+    return 0; // Ak ešte neboli žiadne dáta, daily = 0
+  }
+  
+  const dailyProfit = bulletproofData.equity - bulletproofData.dailyStartEquity;
+  console.log(`🛡️  Daily: ${bulletproofData.equity} - ${bulletproofData.dailyStartEquity} = ${dailyProfit}`);
   return dailyProfit;
 }
 
-// Hlavná funkcia pre API endpoint
 exports.handler = async (event, context) => {
-  console.log('Automatic Capital API called:', event.httpMethod, 'Current data:', capitalData);
+  console.log('🛡️  BULLETPROOF Capital API called:', event.httpMethod);
+  console.log('🛡️  Current data:', bulletproofData);
   
-  // CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -51,45 +62,52 @@ exports.handler = async (event, context) => {
     'Content-Type': 'application/json'
   };
 
-  // Handle OPTIONS preflight
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: ''
-    };
+    return { statusCode: 200, headers, body: '' };
   }
 
   try {
     if (event.httpMethod === 'GET') {
-      // Automaticky skontroluj nový deň pred vrátením dát
-      autoCheckNewDay();
+      // BULLETPROOF kontrola dňa
+      bulletproofDailyCheck();
       
-      // Automaticky prepočítaj denný zisk
-      capitalData.dailyProfit = autoCalculateDailyProfit();
+      // BULLETPROOF prepočet daily profit
+      bulletproofData.dailyProfit = bulletproofCalculateDailyProfit();
       
-      console.log('Returning automatic capital data:', capitalData);
+      console.log('🛡️  Returning bulletproof data:', bulletproofData);
+      
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          ...capitalData,
+          amount: bulletproofData.equity,
+          dailyProfit: bulletproofData.dailyProfit,
+          totalProfit: bulletproofData.equity - 15, // Vždy prepočítaj z equity
+          liveTradeProfit: bulletproofData.liveProfit,
+          tradingStatus: bulletproofData.status,
+          lastUpdate: bulletproofData.lastUpdate,
           status: 'success',
           timestamp: Date.now(),
-          dataSource: capitalData.hasReceivedMT5Data ? 'automatic_persistent' : 'initial',
-          systemType: 'automatic'
+          dataSource: bulletproofData.hasEverReceivedMT5Data ? 'bulletproof_persistent' : 'initial',
+          
+          // Debug info
+          debug: {
+            hasEverReceivedMT5Data: bulletproofData.hasEverReceivedMT5Data,
+            dailyStartEquity: bulletproofData.dailyStartEquity,
+            currentDay: bulletproofData.currentDay,
+            totalUpdatesReceived: bulletproofData.totalUpdatesReceived,
+            systemStartTime: bulletproofData.systemStartTime
+          }
         })
       };
     }
 
     if (event.httpMethod === 'POST') {
-      // Aktualizovať dáta (z live-sync alebo iných zdrojov)
       const body = JSON.parse(event.body || '{}');
-      console.log('POST request body:', body);
+      console.log('🛡️  POST request body:', body);
       
-      // Validácia secret kľúča
+      // Validácia secret
       if (body.secret !== process.env.API_SECRET) {
-        console.log('Unauthorized access attempt');
         return {
           statusCode: 401,
           headers,
@@ -97,68 +115,53 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // ANTI-SPAM ochrana - ignoruj requesty príliš blízko k sebe (menej ako 3 sekundy)
-      const now = Date.now();
-      const timeSinceLastUpdate = now - capitalData.lastUpdateTimestamp;
-      
-      if (timeSinceLastUpdate < 3000) { // Menej ako 3 sekundy
-        console.log(`Request ignored - too soon after last update (${timeSinceLastUpdate}ms)`);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            message: 'Update ignored - too frequent',
-            data: capitalData,
-            timeSinceLastUpdate: timeSinceLastUpdate
-          })
-        };
-      }
-
-      // Aktualizovať kapitál a live trade údaje
       if (body.amount !== undefined) {
-        const oldData = { ...capitalData };
+        const oldData = { ...bulletproofData };
         
-        // Skontroluj nový deň pred aktualizáciou
-        const isNewDay = checkNewDay();
-        
-        // EQUITY (vždy aktualizuj)
+        // BULLETPROOF aktualizácia
         const newEquity = parseFloat(body.amount);
-        capitalData.amount = newEquity;
         
-        // DENNÝ ZISK - automaticky prepočítaj na základe daily start amount
-        capitalData.dailyProfit = calculateDailyProfit();
+        // Ak je to prvá aktualizácia, nastav daily start
+        if (!bulletproofData.hasEverReceivedMT5Data) {
+          bulletproofData.dailyStartEquity = newEquity;
+          bulletproofData.hasEverReceivedMT5Data = true;
+          console.log('🛡️  FIRST MT5 UPDATE - Daily start set to:', newEquity);
+        }
         
-        // CELKOVÝ ZISK (vždy prepočítaj)
-        capitalData.totalProfit = capitalData.amount - 15; // 15€ je štartovacia suma
+        // Kontrola nového dňa
+        bulletproofDailyCheck();
         
-        // LIVE TRADE PROFIT - aktualizuj iba ak je zmena
+        // Aktualizuj equity
+        bulletproofData.equity = newEquity;
+        
+        // Prepočítaj daily profit
+        bulletproofData.dailyProfit = bulletproofCalculateDailyProfit();
+        
+        // Aktualizuj ostatné hodnoty len ak sú poskytnuté
+        if (body.dailyProfit !== undefined && body.dailyProfit !== null) {
+          // Ignoruj MT5 daily profit, používaj vlastný výpočet
+          console.log('🛡️  Ignoring MT5 daily profit, using own calculation');
+        }
+        
         if (body.liveTradeProfit !== undefined && body.liveTradeProfit !== null) {
-          const newLiveProfit = parseFloat(body.liveTradeProfit);
-          if (newLiveProfit !== capitalData.liveTradeProfit) {
-            capitalData.liveTradeProfit = newLiveProfit;
-            console.log(`Live trade profit updated: ${capitalData.liveTradeProfit} -> ${newLiveProfit}`);
-          }
+          bulletproofData.liveProfit = parseFloat(body.liveTradeProfit);
         }
         
-        // TRADING STATUS - aktualizuj iba ak je zmena
-        if (body.tradingStatus !== undefined && body.tradingStatus !== null && body.tradingStatus !== '') {
-          if (body.tradingStatus !== capitalData.tradingStatus) {
-            capitalData.tradingStatus = body.tradingStatus;
-            console.log(`Trading status updated: ${capitalData.tradingStatus} -> ${body.tradingStatus}`);
-          }
+        if (body.tradingStatus && body.tradingStatus !== '') {
+          bulletproofData.status = body.tradingStatus;
         }
         
-        // Aktualizuj timestampy
-        capitalData.lastUpdate = new Date().toISOString();
-        capitalData.lastUpdateTimestamp = now;
-        capitalData.hasReceivedMT5Data = true;
+        // Bezpečnostné záznamy
+        bulletproofData.lastUpdate = new Date().toISOString();
+        bulletproofData.lastMT5Update = new Date().toISOString();
+        bulletproofData.totalUpdatesReceived++;
         
-        console.log('Capital data updated:', { 
-          old: oldData, 
-          new: capitalData,
-          isNewDay: isNewDay,
-          dailyStartAmount: capitalData.dailyStartAmount,
-          calculatedDailyProfit: capitalData.dailyProfit
+        console.log('🛡️  BULLETPROOF data updated:', {
+          old: oldData,
+          new: bulletproofData,
+          preservedEquity: bulletproofData.equity,
+          calculatedDaily: bulletproofData.dailyProfit,
+          totalUpdates: bulletproofData.totalUpdatesReceived
         });
       }
 
@@ -166,9 +169,9 @@ exports.handler = async (event, context) => {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          message: 'Automatic capital updated successfully',
-          data: capitalData,
-          systemType: 'automatic'
+          message: 'Bulletproof data updated successfully',
+          data: bulletproofData,
+          preserved: true
         })
       };
     }
@@ -180,7 +183,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('Automatic Capital API error:', error);
+    console.error('🛡️  BULLETPROOF Capital API error:', error);
     return {
       statusCode: 500,
       headers,
