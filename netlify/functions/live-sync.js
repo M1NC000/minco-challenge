@@ -1,5 +1,6 @@
-// Live data storage (in memory) - BEZ POČIATOČNÝCH HODNÔT
+// Live data storage (in memory) - ZACHOVÁVA POSLEDNÉ HODNOTY
 let liveData = null; // Začína ako null
+let lastValidData = null; // Ukladá posledné platné dáta z MT5
 
 exports.handler = async (event, context) => {
   console.log('Live-sync called:', event.httpMethod, new Date().toISOString());
@@ -17,38 +18,61 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // Ak nie sú žiadne dáta, vráť štartové hodnoty
-      if (!liveData) {
+      // Ak máme uložené posledné platné dáta, vráť ich
+      if (lastValidData) {
+        console.log('Returning last valid data:', lastValidData);
         return {
           statusCode: 200,
           headers,
           body: JSON.stringify({
-            amount: 15,
-            dailyProfit: 0,
-            totalProfit: 0,
-            liveTradeProfit: 0,
-            tradingStatus: 'No positions',
-            lastUpdate: new Date().toISOString(),
+            amount: lastValidData.equity,
+            dailyProfit: lastValidData.daily,
+            totalProfit: lastValidData.equity - 15,
+            liveTradeProfit: lastValidData.live,
+            tradingStatus: lastValidData.status,
+            lastUpdate: lastValidData.lastUpdate,
             status: 'success',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            dataSource: 'cached' // Indikuje že sú to uložené dáta
           })
         };
       }
       
-      // Vráť aktuálne live dáta
-      console.log('Returning live data:', liveData);
+      // Ak máme aktuálne live dáta, vráť ich
+      if (liveData) {
+        console.log('Returning current live data:', liveData);
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            amount: liveData.equity,
+            dailyProfit: liveData.daily,
+            totalProfit: liveData.equity - 15,
+            liveTradeProfit: liveData.live,
+            tradingStatus: liveData.status,
+            lastUpdate: liveData.lastUpdate,
+            status: 'success',
+            timestamp: Date.now(),
+            dataSource: 'live'
+          })
+        };
+      }
+      
+      // Ak nie sú žiadne dáta, vráť štartové hodnoty (len prvý krát)
+      console.log('No data available, returning initial values');
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          amount: liveData.equity,
-          dailyProfit: liveData.daily,
-          totalProfit: liveData.equity - 15,
-          liveTradeProfit: liveData.live,
-          tradingStatus: liveData.status,
-          lastUpdate: liveData.lastUpdate,
+          amount: 15,
+          dailyProfit: 0,
+          totalProfit: 0,
+          liveTradeProfit: 0,
+          tradingStatus: 'No positions',
+          lastUpdate: new Date().toISOString(),
           status: 'success',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          dataSource: 'initial'
         })
       };
     }
@@ -70,7 +94,11 @@ exports.handler = async (event, context) => {
           lastUpdate: new Date().toISOString()
         };
 
+        // ULOŽÍ AKO POSLEDNÉ PLATNÉ DÁTA (backup pre prípad odpojenia)
+        lastValidData = { ...liveData };
+
         console.log('Updated live data:', { old: oldData, new: liveData });
+        console.log('Saved as last valid data:', lastValidData);
 
         // Aktualizuj aj hlavné capital API
         try {
@@ -99,7 +127,8 @@ exports.handler = async (event, context) => {
           body: JSON.stringify({ 
             success: true, 
             message: 'Live data updated and stored',
-            data: liveData 
+            data: liveData,
+            backup: 'Last valid data saved'
           })
         };
       } else {
