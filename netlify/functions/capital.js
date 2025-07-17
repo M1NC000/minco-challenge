@@ -1,4 +1,4 @@
-// PERZISTENTNÉ dáta (uložené aj po reštarte funkcie)
+// AUTOMATIC CAPITAL API - Spolupracuje s automatickým MT5 systémom
 let capitalData = {
   amount: 15.00,
   dailyProfit: 0,
@@ -6,12 +6,42 @@ let capitalData = {
   liveTradeProfit: 0,
   tradingStatus: 'No positions',
   lastUpdate: new Date().toISOString(),
-  hasReceivedMT5Data: false // Flag či už boli prijaté dáta z MT5
+  hasReceivedMT5Data: false,
+  currentDay: new Date().toISOString().split('T')[0],
+  dailyStartAmount: 15.00,
+  isAutomatic: true // Flag pre automatický systém
 };
+
+// Automatická kontrola nového dňa
+function autoCheckNewDay() {
+  const today = new Date().toISOString().split('T')[0];
+  
+  if (capitalData.currentDay !== today) {
+    console.log(`🌅 AUTOMATIC NEW DAY: ${capitalData.currentDay} -> ${today}`);
+    
+    // Automaticky aktualizuj štartovú sumu
+    capitalData.dailyStartAmount = capitalData.amount;
+    capitalData.currentDay = today;
+    capitalData.dailyProfit = 0;
+    
+    console.log(`📊 Automatic daily start: ${capitalData.dailyStartAmount}€`);
+    
+    return true;
+  }
+  
+  return false;
+}
+
+// Automatický prepočet denného zisku
+function autoCalculateDailyProfit() {
+  const dailyProfit = capitalData.amount - capitalData.dailyStartAmount;
+  console.log(`🧮 Auto daily calculation: ${capitalData.amount} - ${capitalData.dailyStartAmount} = ${dailyProfit}`);
+  return dailyProfit;
+}
 
 // Hlavná funkcia pre API endpoint
 exports.handler = async (event, context) => {
-  console.log('Capital API called:', event.httpMethod, 'Current data:', capitalData);
+  console.log('Automatic Capital API called:', event.httpMethod, 'Current data:', capitalData);
   
   // CORS headers
   const headers = {
@@ -32,8 +62,13 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // VŽDY vráti aktuálne uložené dáta (nikdy sa nevráti na štartové)
-      console.log('Returning capital data:', capitalData);
+      // Automaticky skontroluj nový deň pred vrátením dát
+      autoCheckNewDay();
+      
+      // Automaticky prepočítaj denný zisk
+      capitalData.dailyProfit = autoCalculateDailyProfit();
+      
+      console.log('Returning automatic capital data:', capitalData);
       return {
         statusCode: 200,
         headers,
@@ -41,7 +76,8 @@ exports.handler = async (event, context) => {
           ...capitalData,
           status: 'success',
           timestamp: Date.now(),
-          dataSource: capitalData.hasReceivedMT5Data ? 'persistent' : 'initial'
+          dataSource: capitalData.hasReceivedMT5Data ? 'automatic_persistent' : 'initial',
+          systemType: 'automatic'
         })
       };
     }
@@ -61,44 +97,78 @@ exports.handler = async (event, context) => {
         };
       }
 
+      // ANTI-SPAM ochrana - ignoruj requesty príliš blízko k sebe (menej ako 3 sekundy)
+      const now = Date.now();
+      const timeSinceLastUpdate = now - capitalData.lastUpdateTimestamp;
+      
+      if (timeSinceLastUpdate < 3000) { // Menej ako 3 sekundy
+        console.log(`Request ignored - too soon after last update (${timeSinceLastUpdate}ms)`);
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            message: 'Update ignored - too frequent',
+            data: capitalData,
+            timeSinceLastUpdate: timeSinceLastUpdate
+          })
+        };
+      }
+
       // Aktualizovať kapitál a live trade údaje
       if (body.amount !== undefined) {
         const oldData = { ...capitalData };
         
-        capitalData.amount = parseFloat(body.amount);
+        // Skontroluj nový deň pred aktualizáciou
+        const isNewDay = checkNewDay();
         
-        // DENNÝ ZISK - zachová starú hodnotu ak nepríde nová
-        if (body.dailyProfit !== undefined && body.dailyProfit !== null) {
-          capitalData.dailyProfit = parseFloat(body.dailyProfit);
-        }
-        // Ak nepríde dailyProfit, ZACHOVÁ starú hodnotu (neresetnúť na 0)
+        // EQUITY (vždy aktualizuj)
+        const newEquity = parseFloat(body.amount);
+        capitalData.amount = newEquity;
         
+        // DENNÝ ZISK - automaticky prepočítaj na základe daily start amount
+        capitalData.dailyProfit = calculateDailyProfit();
+        
+        // CELKOVÝ ZISK (vždy prepočítaj)
         capitalData.totalProfit = capitalData.amount - 15; // 15€ je štartovacia suma
         
-        // LIVE TRADE PROFIT - zachová starú hodnotu ak nepríde nová
+        // LIVE TRADE PROFIT - aktualizuj iba ak je zmena
         if (body.liveTradeProfit !== undefined && body.liveTradeProfit !== null) {
-          capitalData.liveTradeProfit = parseFloat(body.liveTradeProfit);
+          const newLiveProfit = parseFloat(body.liveTradeProfit);
+          if (newLiveProfit !== capitalData.liveTradeProfit) {
+            capitalData.liveTradeProfit = newLiveProfit;
+            console.log(`Live trade profit updated: ${capitalData.liveTradeProfit} -> ${newLiveProfit}`);
+          }
         }
-        // Ak nepríde liveTradeProfit, ZACHOVÁ starú hodnotu
         
-        // TRADING STATUS - zachová starý ak nepríde nový
+        // TRADING STATUS - aktualizuj iba ak je zmena
         if (body.tradingStatus !== undefined && body.tradingStatus !== null && body.tradingStatus !== '') {
-          capitalData.tradingStatus = body.tradingStatus;
+          if (body.tradingStatus !== capitalData.tradingStatus) {
+            capitalData.tradingStatus = body.tradingStatus;
+            console.log(`Trading status updated: ${capitalData.tradingStatus} -> ${body.tradingStatus}`);
+          }
         }
-        // Ak nepríde tradingStatus, ZACHOVÁ starý
         
+        // Aktualizuj timestampy
         capitalData.lastUpdate = new Date().toISOString();
-        capitalData.hasReceivedMT5Data = true; // Označí že už boli prijaté dáta z MT5
+        capitalData.lastUpdateTimestamp = now;
+        capitalData.hasReceivedMT5Data = true;
         
-        console.log('Capital data updated:', { old: oldData, new: capitalData });
+        console.log('Capital data updated:', { 
+          old: oldData, 
+          new: capitalData,
+          isNewDay: isNewDay,
+          dailyStartAmount: capitalData.dailyStartAmount,
+          calculatedDailyProfit: capitalData.dailyProfit
+        });
       }
 
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          message: 'Capital updated successfully',
-          data: capitalData
+          message: 'Automatic capital updated successfully',
+          data: capitalData,
+          systemType: 'automatic'
         })
       };
     }
@@ -110,7 +180,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('Capital API error:', error);
+    console.error('Automatic Capital API error:', error);
     return {
       statusCode: 500,
       headers,
