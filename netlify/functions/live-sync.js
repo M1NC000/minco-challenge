@@ -76,16 +76,30 @@ exports.handler = async (event, context) => {
 
         // Aktualizuj hlavné capital API (perzistentné úložisko)
         try {
+          const updatePayload = {
+            amount: newData.equity,
+            secret: process.env.API_SECRET
+          };
+          
+          // Pridaj iba ak má platnú hodnotu (nie NaN, null, undefined)
+          if (!isNaN(newData.daily) && newData.daily !== null) {
+            updatePayload.dailyProfit = newData.daily;
+          }
+          
+          if (!isNaN(newData.live) && newData.live !== null) {
+            updatePayload.liveTradeProfit = newData.live;
+          }
+          
+          if (newData.status && newData.status.trim() !== '') {
+            updatePayload.tradingStatus = newData.status;
+          }
+          
+          console.log('Sending to capital API:', updatePayload);
+          
           const capitalResponse = await fetch('https://minco.netlify.app/.netlify/functions/capital', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              amount: newData.equity,
-              dailyProfit: newData.daily,
-              liveTradeProfit: newData.live,
-              tradingStatus: newData.status,
-              secret: process.env.API_SECRET
-            })
+            body: JSON.stringify(updatePayload)
           });
           
           if (capitalResponse.ok) {
