@@ -101,7 +101,7 @@
             letter-spacing: 0.5px;
             line-height: normal;
             margin-bottom: 0.5rem;
-            margin-top: 2rem;
+            margin-top: clamp(4rem, 8vh, 8rem);
             text-rendering: optimizeLegibility;
             text-transform: uppercase;
         }
@@ -541,7 +541,7 @@
             }
             
             .subtitle-small {
-                margin-top: 1rem;
+                margin-top: 3rem;
             }
             
             .table-container {
@@ -580,7 +580,7 @@
             }
             
             .subtitle-small {
-                margin-top: 0.5rem;
+                margin-top: 2rem;
             }
             
             .final-result {
@@ -633,15 +633,15 @@
                         <div class="status-indicator"></div>
                         <div class="capital-title">AKTUÁLNY KAPITÁL</div>
                     </div>
-                    <div class="capital-amount" id="current-capital">0,00€</div>
+                    <div class="capital-amount" id="current-capital">15,00€</div>
                     <div class="capital-info">
                         <div class="info-item">
                             <div class="info-label">DENNÝ ZISK</div>
-                            <div class="info-value profit-value" id="daily-profit">+0,00€</div>
+                            <div class="info-value" id="daily-profit">+0,00€</div>
                         </div>
                         <div class="info-item">
                             <div class="info-label">CELKOVÝ ZISK</div>
-                            <div class="info-value profit-value" id="total-profit">+0,00€</div>
+                            <div class="info-value" id="total-profit">+0,00€</div>
                         </div>
                         <div class="info-item">
                             <div class="info-label">LIVE TRADE</div>
@@ -676,7 +676,7 @@
             isProduction: true
         };
 
-        // Globálne premenné pre kapitál
+        // Globálne premenné pre kapitál - štartové hodnoty
         let currentCapitalData = {
             amount: 15,
             dailyProfit: 0,
@@ -785,18 +785,22 @@
             const liveTradeElement = document.getElementById('live-trade');
             const lastUpdateElement = document.getElementById('last-update');
             
-            // Animované aktualizácie
+            // Animované aktualizácie len ak sa hodnoty zmenili
             if (capitalElement) {
                 const currentAmount = parseFloat(capitalElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
-                animateValue(capitalElement, currentAmount, data.amount);
+                if (Math.abs(currentAmount - data.amount) > 0.01) {
+                    animateValue(capitalElement, currentAmount, data.amount);
+                }
             }
             
             if (dailyProfitElement) {
                 const currentDaily = parseFloat(dailyProfitElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
-                animateValue(dailyProfitElement, currentDaily, data.dailyProfit, 800, (val) => {
-                    const sign = val >= 0 ? '+' : '';
-                    return sign + formatNumber(val) + '€';
-                });
+                if (Math.abs(currentDaily - data.dailyProfit) > 0.01) {
+                    animateValue(dailyProfitElement, currentDaily, data.dailyProfit, 800, (val) => {
+                        const sign = val >= 0 ? '+' : '';
+                        return sign + formatNumber(val) + '€';
+                    });
+                }
                 
                 // Zmena farby na základe profitu/straty
                 if (data.dailyProfit >= 0) {
@@ -808,10 +812,12 @@
             
             if (totalProfitElement) {
                 const currentTotal = parseFloat(totalProfitElement.textContent.replace(/[^0-9,-]/g, '').replace(',', '.')) || 0;
-                animateValue(totalProfitElement, currentTotal, data.totalProfit, 800, (val) => {
-                    const sign = val >= 0 ? '+' : '';
-                    return sign + formatNumber(val) + '€';
-                });
+                if (Math.abs(currentTotal - data.totalProfit) > 0.01) {
+                    animateValue(totalProfitElement, currentTotal, data.totalProfit, 800, (val) => {
+                        const sign = val >= 0 ? '+' : '';
+                        return sign + formatNumber(val) + '€';
+                    });
+                }
                 
                 // Zmena farby na základe profitu/straty
                 if (data.totalProfit >= 0) {
@@ -846,22 +852,6 @@
             updateCompletedDays(data.amount);
         }
 
-        // Simulácia dat pre demo (odstráňte v produkčnom prostredí)
-        function generateDemoData() {
-            const variation = (Math.random() - 0.5) * 10; // ±5€ variácia
-            const baseAmount = 15 + (Date.now() % 1000) / 100; // Simulácia rastúceho kapitálu
-            const liveTradeVariation = (Math.random() - 0.5) * 20; // ±10€ live trade
-            
-            return {
-                amount: baseAmount + variation,
-                dailyProfit: variation,
-                totalProfit: baseAmount - 15,
-                liveTradeProfit: Math.random() > 0.3 ? liveTradeVariation : 0, // 70% šanca na otvorenú pozíciu
-                tradingStatus: Math.random() > 0.3 ? 'Trading aktívny' : 'Žiadne pozície',
-                lastUpdate: new Date()
-            };
-        }
-
         // Funkcia na získanie dát z Netlify API
         async function fetchCapitalData() {
             try {
@@ -878,8 +868,8 @@
                 
                 const data = await response.json();
                 
-                // Ak je production, použij skutočné dáta
-                if (data.status === 'success') {
+                // Vždy používaj live dáta z API ak sú dostupné
+                if (data.status === 'success' && data.amount !== undefined) {
                     currentCapitalData = {
                         amount: data.amount || 15,
                         dailyProfit: data.dailyProfit || 0,
@@ -888,36 +878,13 @@
                         tradingStatus: data.tradingStatus || 'Žiadne pozície',
                         lastUpdate: new Date(data.lastUpdate || Date.now())
                     };
-                } else {
-                    // Demo data pre localhost/development
-                    const demoData = generateDemoData();
-                    currentCapitalData = {
-                        amount: demoData.amount,
-                        dailyProfit: demoData.dailyProfit,
-                        totalProfit: demoData.totalProfit,
-                        liveTradeProfit: demoData.liveTradeProfit,
-                        tradingStatus: demoData.tradingStatus,
-                        lastUpdate: new Date()
-                    };
+                    
+                    updateCapitalDisplay(currentCapitalData);
                 }
-                
-                updateCapitalDisplay(currentCapitalData);
                 
             } catch (error) {
                 console.error('Chyba pri načítavaní kapitálu:', error);
-                
-                // Fallback na demo data
-                const demoData = generateDemoData();
-                currentCapitalData = {
-                    amount: demoData.amount,
-                    dailyProfit: demoData.dailyProfit,
-                    totalProfit: demoData.totalProfit,
-                    liveTradeProfit: demoData.liveTradeProfit,
-                    tradingStatus: demoData.tradingStatus,
-                    lastUpdate: new Date()
-                };
-                
-                updateCapitalDisplay(currentCapitalData);
+                // Pri chybe neaktualizuj nič - nechaj posledné hodnoty
             }
         }
 
@@ -990,9 +957,6 @@
             
             // Uložiť data pre automatické označovanie
             window.tableData = data;
-            
-            // Všetky checkboxy sú zakázané - iba zobrazenie
-            const readOnlyMode = true;
             
             // Clear table
             tableContainer.innerHTML = '';
