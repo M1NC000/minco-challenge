@@ -1,11 +1,5 @@
-// Live data storage (in memory)
-let liveData = {
-  equity: 91.58,
-  daily: 0.00,
-  live: -0.28,
-  status: 'EURUSD 0.01 Short',
-  lastUpdate: new Date().toISOString()
-};
+// Live data storage (in memory) - BEZ POČIATOČNÝCH HODNÔT
+let liveData = null; // Začína ako null
 
 exports.handler = async (event, context) => {
   console.log('Live-sync called:', event.httpMethod, new Date().toISOString());
@@ -23,6 +17,24 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
+      // Ak nie sú žiadne dáta, vráť štartové hodnoty
+      if (!liveData) {
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            amount: 15,
+            dailyProfit: 0,
+            totalProfit: 0,
+            liveTradeProfit: 0,
+            tradingStatus: 'No positions',
+            lastUpdate: new Date().toISOString(),
+            status: 'success',
+            timestamp: Date.now()
+          })
+        };
+      }
+      
       // Vráť aktuálne live dáta
       console.log('Returning live data:', liveData);
       return {
@@ -47,8 +59,9 @@ exports.handler = async (event, context) => {
       console.log('Received POST data:', body);
       
       if (body.equity !== undefined) {
-        const oldData = { ...liveData };
+        const oldData = liveData ? { ...liveData } : null;
         
+        // ULOŽÍ NAJNOVŠIE ÚDAJE Z MT5
         liveData = {
           equity: parseFloat(body.equity),
           daily: parseFloat(body.daily) || 0,
@@ -75,8 +88,6 @@ exports.handler = async (event, context) => {
           
           if (capitalResponse.ok) {
             console.log('Capital API updated successfully');
-          } else {
-            console.error('Failed to update capital API:', capitalResponse.status);
           }
         } catch (error) {
           console.error('Error updating capital API:', error);
@@ -87,7 +98,7 @@ exports.handler = async (event, context) => {
           headers,
           body: JSON.stringify({ 
             success: true, 
-            message: 'Live data updated',
+            message: 'Live data updated and stored',
             data: liveData 
           })
         };
