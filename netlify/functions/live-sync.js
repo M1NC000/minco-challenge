@@ -1,6 +1,5 @@
-// Live data storage (in memory) - ZACHOVÁVA POSLEDNÉ HODNOTY
-let liveData = null; // Začína ako null
-let lastValidData = null; // Ukladá posledné platné dáta z MT5
+// Live-sync iba spracováva a predáva dáta do capital.js
+// Neuchováva žiadne dáta v pamäti (kvôli cold start problémom)
 
 exports.handler = async (event, context) => {
   console.log('Live-sync called:', event.httpMethod, new Date().toISOString());
@@ -18,75 +17,54 @@ exports.handler = async (event, context) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      // Ak máme aktuálne live dáta, vráť ich (priorita)
-      if (liveData) {
-        console.log('Returning current live data:', liveData);
+      // PRESMERUJE na capital API (hlavné úložisko)
+      console.log('Redirecting GET request to capital API');
+      
+      try {
+        const capitalResponse = await fetch('https://minco.netlify.app/.netlify/functions/capital', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (capitalResponse.ok) {
+          const capitalData = await capitalResponse.json();
+          console.log('Retrieved data from capital API:', capitalData);
+          
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              amount: capitalData.amount,
+              dailyProfit: capitalData.dailyProfit,
+              totalProfit: capitalData.totalProfit,
+              liveTradeProfit: capitalData.liveTradeProfit,
+              tradingStatus: capitalData.tradingStatus,
+              lastUpdate: capitalData.lastUpdate,
+              status: 'success',
+              timestamp: Date.now(),
+              dataSource: 'capital_api'
+            })
+          };
+        } else {
+          throw new Error(`Capital API returned ${capitalResponse.status}`);
+        }
+      } catch (error) {
+        console.error('Error fetching from capital API:', error);
         return {
-          statusCode: 200,
+          statusCode: 500,
           headers,
-          body: JSON.stringify({
-            amount: liveData.equity,
-            dailyProfit: liveData.daily,
-            totalProfit: liveData.equity - 15,
-            liveTradeProfit: liveData.live,
-            tradingStatus: liveData.status,
-            lastUpdate: liveData.lastUpdate,
-            status: 'success',
-            timestamp: Date.now(),
-            dataSource: 'live'
-          })
+          body: JSON.stringify({ error: 'Failed to fetch capital data' })
         };
       }
-      
-      // Ak máme uložené posledné platné dáta, vráť ich (backup po odpojení)
-      if (lastValidData) {
-        console.log('Returning last valid data (MT5 disconnected):', lastValidData);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            amount: lastValidData.equity,
-            dailyProfit: lastValidData.daily,
-            totalProfit: lastValidData.equity - 15,
-            liveTradeProfit: lastValidData.live,
-            tradingStatus: lastValidData.status,
-            lastUpdate: lastValidData.lastUpdate,
-            status: 'success',
-            timestamp: Date.now(),
-            dataSource: 'cached'
-          })
-        };
-      }
-      
-      // Ak nie sú VÔBEC žiadne dáta (prvé spustenie), vráť štartové hodnoty
-      console.log('No data available - first run, returning initial values');
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          amount: 15,
-          dailyProfit: 0,
-          totalProfit: 0,
-          liveTradeProfit: 0,
-          tradingStatus: 'No positions',
-          lastUpdate: new Date().toISOString(),
-          status: 'success',
-          timestamp: Date.now(),
-          dataSource: 'initial'
-        })
-      };
     }
 
     if (event.httpMethod === 'POST') {
-      // Aktualizuj live dáta (z MT5)
+      // Aktualizuj dáta (z MT5) a uloží do capital API
       const body = JSON.parse(event.body || '{}');
-      console.log('Received POST data:', body);
+      console.log('Received POST data from MT5:', body);
       
       if (body.equity !== undefined) {
-        const oldData = liveData ? { ...liveData } : null;
-        
-        // ULOŽÍ NAJNOVŠIE ÚDAJE Z MT5
-        liveData = {
+        const newData = {
           equity: parseFloat(body.equity),
           daily: parseFloat(body.daily) || 0,
           live: parseFloat(body.live) || 0,
@@ -94,43 +72,46 @@ exports.handler = async (event, context) => {
           lastUpdate: new Date().toISOString()
         };
 
-        // ULOŽÍ AKO POSLEDNÉ PLATNÉ DÁTA (backup pre prípad odpojenia)
-        lastValidData = { ...liveData };
+        console.log('Processing MT5 data:', newData);
 
-        console.log('Updated live data:', { old: oldData, new: liveData });
-        console.log('Saved as last valid data:', lastValidData);
-
-        // Aktualizuj aj hlavné capital API
+        // Aktualizuj hlavné capital API (perzistentné úložisko)
         try {
           const capitalResponse = await fetch('https://minco.netlify.app/.netlify/functions/capital', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              amount: liveData.equity,
-              dailyProfit: liveData.daily,
-              liveTradeProfit: liveData.live,
-              tradingStatus: liveData.status,
+              amount: newData.equity,
+              dailyProfit: newData.daily,
+              liveTradeProfit: newData.live,
+              tradingStatus: newData.status,
               secret: process.env.API_SECRET
             })
           });
           
           if (capitalResponse.ok) {
             console.log('Capital API updated successfully');
+            const updatedData = await capitalResponse.json();
+            
+            return {
+              statusCode: 200,
+              headers,
+              body: JSON.stringify({ 
+                success: true, 
+                message: 'Live data updated and stored in capital API',
+                data: updatedData.data
+              })
+            };
+          } else {
+            throw new Error(`Capital API update failed: ${capitalResponse.status}`);
           }
         } catch (error) {
           console.error('Error updating capital API:', error);
+          return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ error: 'Failed to update capital API' })
+          };
         }
-
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({ 
-            success: true, 
-            message: 'Live data updated and stored',
-            data: liveData,
-            backup: 'Last valid data saved'
-          })
-        };
       } else {
         return {
           statusCode: 400,
