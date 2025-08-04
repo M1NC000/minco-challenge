@@ -1,0 +1,172 @@
+# MINCO Challenge - Kompletná Netlify konfigurácia v2.0
+
+[build]
+  # Build nastavения
+  publish = "."
+  functions = "netlify/functions"
+  command = "echo 'MINCO Challenge v2.0 - No build process needed'"
+
+[build.environment]
+  # Node.js verzia
+  NODE_VERSION = "18"
+  NPM_VERSION = "9"
+
+[functions]
+  # Functions nastavения
+  node_bundler = "esbuild"
+  external_node_modules = ["node-fetch"]
+  included_files = ["netlify/functions/**"]
+
+[functions."capital"]
+  # Capital API - hlavné úložisko
+  timeout = 30
+  memory = 512
+  
+[functions."live-sync"]  
+  # Live-sync proxy
+  timeout = 15
+  memory = 256
+
+# Redirects a rewrites
+[[redirects]]
+  # API proxy redirects
+  from = "/api/capital"
+  to = "/.netlify/functions/capital"
+  status = 200
+  
+[[redirects]]
+  from = "/api/live-sync"
+  to = "/.netlify/functions/live-sync" 
+  status = 200
+
+[[redirects]]
+  # Všetky API cesty
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  # Health check
+  from = "/health"
+  to = "/.netlify/functions/capital"
+  status = 200
+
+[[redirects]]
+  # SPA fallback pre single page app
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions = {Role = ["admin"], Country = ["!US"]}
+  force = false
+
+# Headers pre rôzne súbory
+[[headers]]
+  # API endpoints
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  # Netlify functions
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization, X-Requested-With"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Cache-Control = "no-cache"
+
+[[headers]]
+  # HTML súbory
+  for = "/*.html"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Development nastavenia
+[dev]
+  command = "echo 'MINCO Challenge Development Server'"
+  functions = "netlify/functions"
+  publish = "."
+  port = 8888
+  targetPort = 3000
+  framework = "#static"
+  autoLaunch = true
+
+# Deployment nastavenia
+[context.production]
+  command = "echo 'Production build - MINCO Challenge v2.0'"
+  
+[context.production.environment]
+  NODE_ENV = "production"
+  MINCO_VERSION = "2.0"
+
+[context.deploy-preview]
+  command = "echo 'Deploy preview - MINCO Challenge'"
+
+[context.branch-deploy]
+  command = "echo 'Branch deploy - MINCO Challenge'"
+
+# Edge functions (ak budeme potrebovať)
+# [[edge_functions]]
+#   function = "geo-location"
+#   path = "/api/location"
+
+# Plugin konfigurácia
+[[plugins]]
+  package = "@netlify/plugin-sitemap"
+  
+  [plugins.inputs]
+    buildDir = "."
+    exclude = [
+      "/admin/**",
+      "/api/**", 
+      "/.netlify/**"
+    ]
+
+# Environment variables dokumentácia
+# Pre správne fungovanie aplikácie nastavte tieto premenné v Netlify dashboard:
+# 
+# API_SECRET = "your_super_secret_key_here"
+#   - Tajný kľúč pre MT5 EA komunikáciu
+#   - Musí byť rovnaký v EA a Netlify
+#   - Minimálne 20 znakov, kombinárcia písmen, čísiel a symbolov
+#
+# NODE_ENV = "production" 
+#   - Automaticky nastavené, ale môže byť override
+#
+# MINCO_VERSION = "2.0"
+#   - Verzia aplikácie pre tracking
+
+# Formy (ak budeme potrebovať)
+# [context.production]
+#   [context.production.processing]
+#     skip_processing = false
+#   [context.production.processing.css]
+#     bundle = true
+#     minify = true
+#   [context.production.processing.js] 
+#     bundle = true
+#     minify = true
+#   [context.production.processing.html]
+#     pretty_urls = true
+#   [context.production.processing.images]
+#     compress = true
+
+# Large Media (ak budeme mať veľké súbory)
+# [build.processing]
+#   skip_processing = false
+# [build.processing.css]
+#   bundle = true
+#   minify = true
+# [build.processing.js]
+#   bundle = true
+#   minify = true
+
+# Identity a formy (ak budeme potrebovať user management)
+# [template.environment]
+#   REACT_APP_NETLIFY_IDENTITY_URL = "https://your-site.netlify.app/.netlify/identity"

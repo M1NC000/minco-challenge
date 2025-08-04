@@ -1,0 +1,167 @@
+{
+  "name": "minco-challenge",
+  "version": "2.0.0",
+  "description": "MINCO Challenge v2.0 - Enhanced real-time trading tracker with persistent data, goal tracking, and comprehensive analytics",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'MINCO Challenge v2.0 - Static site, no build needed'",
+    "start": "netlify dev --port 8888",
+    "deploy": "netlify deploy",
+    "deploy:prod": "netlify deploy --prod",
+    "test": "node test/api-test.js",
+    "test:functions": "netlify functions:serve",
+    "lint": "echo 'Linting would go here'",
+    "format": "echo 'Formatting would go here'",
+    "clean": "rm -rf .netlify dist",
+    "logs": "netlify logs",
+    "status": "netlify status"
+  },
+  "keywords": [
+    "trading",
+    "mt5",
+    "metatrader",
+    "real-time",
+    "challenge",
+    "netlify",
+    "forex",
+    "financial",
+    "tracking",
+    "analytics",
+    "performance",
+    "goals",
+    "persistent-data"
+  ],
+  "author": {
+    "name": "MINCO Challenge Team",
+    "email": "info@minco-challenge.com",
+    "url": "https://minco-challenge.netlify.app"
+  },
+  "license": "MIT",
+  "homepage": "https://minco-challenge.netlify.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/minco-challenge/minco-challenge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minco-challenge/minco-challenge/issues",
+    "email": "support@minco-challenge.com"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.15.4",
+    "@netlify/functions": "^2.4.1",
+    "@netlify/plugin-sitemap": "^0.8.1"
+  },
+  "peerDependencies": {
+    "esbuild": ">=0.19.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.0"
+  },
+  "netlify": {
+    "functions": {
+      "node_bundler": "esbuild",
+      "external_node_modules": [
+        "node-fetch"
+      ],
+      "node_version": "18",
+      "timeout": 30,
+      "memory": 512
+    },
+    "plugins": [
+      {
+        "package": "@netlify/plugin-sitemap"
+      }
+    ]
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ],
+  "config": {
+    "minco": {
+      "version": "2.0.0",
+      "api_version": "v1",
+      "features": [
+        "persistent-data",
+        "goal-tracking", 
+        "real-time-updates",
+        "performance-analytics",
+        "mobile-responsive",
+        "offline-support"
+      ]
+    }
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/minco-challenge"
+    },
+    {
+      "type": "paypal",
+      "url": "https://paypal.me/mincochallenge"
+    }
+  ],
+  "contributors": [
+    {
+      "name": "Lead Developer",
+      "email": "dev@minco-challenge.com",
+      "role": "Backend & MT5 Integration"
+    },
+    {
+      "name": "Frontend Developer", 
+      "email": "frontend@minco-challenge.com",
+      "role": "UI/UX & Responsive Design"
+    }
+  ],
+  "files": [
+    "index.html",
+    "_headers",
+    "netlify.toml",
+    "netlify/functions/**/*.js",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "directories": {
+    "lib": "netlify/functions",
+    "doc": "docs",
+    "test": "test"
+  },
+  "private": false,
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "volta": {
+    "node": "18.19.0",
+    "npm": "10.2.3"
+  },
+  "packageManager": "npm@10.2.3",
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "preferGlobal": false,
+  "man": "./docs/man/minco-challenge.1",
+  "bin": {
+    "minco": "./bin/minco.js"
+  }
+}

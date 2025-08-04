@@ -1,0 +1,1137 @@
+//+------------------------------------------------------------------+
+//|                                              MINCO_Challenge.mq5 |
+//|                                       Enhanced real-time sender  |
+//|                              Sends precise daily profit data     |
+//|                                                          v2.0     |
+//+------------------------------------------------------------------+
+
+#property copyright "MINCO Challenge Enhanced v2.0"
+#property version   "2.00"
+#property description "Kompletný EA pre MINCO Challenge - presný denný zisk, perzistentné dáta, rozšírené funkcie"
+
+#include <Trade\Trade.mqh>
+
+//--- ROZŠÍRENÉ INPUT PARAMETRE
+input group "=== API NASTAVENIA ==="
+input string API_SECRET = "";           // API Secret pre autentifikáciu (POVINNÉ!)
+input string WebhookURL = "https://minco.netlify.app/.netlify/functions/live-sync"; // Live-sync endpoint
+
+input group "=== ČASOVANIE A PERFORMANCE ==="
+input int SendIntervalSeconds = 2;      // Interval posielania v sekundách (min: 1, max: 30)
+input int MaxRetries = 5;               // Maximálny počet pokusov pri chybe
+input int RetryDelaySeconds = 5;        // Čakanie medzi pokusmi v sekundách
+
+input group "=== FUNKCIONALITA ==="
+input bool EnableSending = true;        // Povoliť posielanie dát
+input bool EnablePersistence = true;    // Perzistentné ukladanie equity (ODPORÚČANÉ!)
+input bool AutoCalculateDaily = true;   // Automatický výpočet denného zisku
+input bool TrackGoals = true;           // Sledovanie dosiahnutých cieľov
+
+input group "=== DEBUGGING A MONITORING ==="
+input bool EnableDebug = false;         // Debug výpisy (pre testovanie)
+input bool LogPerformance = true;       // Logovanie performance metrík
+input bool ShowConnectionStatus = true; // Zobrazovanie stavu pripojenia
+
+input group "=== POKROČILÉ NASTAVENIA ==="
+input double MinEquityChange = 0.01;    // Minimálna zmena equity pre okamžité poslanie (€)
+input int MaxDailyRequests = 10000;     // Maximálny počet requestov za deň
+input bool UseCompression = false;      // Kompresia JSON dát (experimentálne)
+
+//--- ROZŠÍRENÉ GLOBÁLNE PREMENNÉ
+datetime lastSendTime = 0;
+double dailyStartEquity = 0;
+string currentDate = "";
+double lastEquity = 0;
+int consecutiveFailures = 0;
+bool isFirstRun = true;
+int dailyRequestCount = 0;
+datetime lastDailyReset = 0;
+
+// Perzistentné súbory
+string persistenceFile = "MINCO_Challenge_Data_v2.txt";
+string performanceFile = "MINCO_Performance_Log.txt";
+string goalsFile = "MINCO_Goals_Achieved.txt";
+
+// Performance tracking
+datetime systemStartTime = 0;
+int totalRequestsSent = 0;
+int totalSuccessfulRequests = 0;
+int totalFailedRequests = 0;
+double totalResponseTime = 0;
+
+// Connection status
+enum CONNECTION_STATUS {
+    CONNECTION_UNKNOWN = 0,
+    CONNECTION_ONLINE = 1,
+    CONNECTION_OFFLINE = 2,
+    CONNECTION_ERROR = 3
+};
+
+CONNECTION_STATUS connectionStatus = CONNECTION_UNKNOWN;
+datetime lastSuccessfulConnection = 0;
+
+CTrade trade;
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ Expert initialization function                         |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    Print("🚀 MINCO Challenge EA Enhanced v2.0 Started");
+    Print("============================================");
+    Print("📊 Account: ", AccountInfoString(ACCOUNT_NAME));
+    Print("🏦 Server: ", AccountInfoString(ACCOUNT_SERVER));
+    Print("💰 Balance: ", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2), "€");
+    Print("📈 Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), "€");
+    Print("🌐 Webhook: ", WebhookURL);
+    Print("============================================");
+    
+    // Validácia kritických parametrov
+    if(API_SECRET == "")
+    {
+        Print("❌ CRITICAL ERROR: API_SECRET is empty!");
+        Print("   Please set API_SECRET in EA parameters.");
+        if(!EnableDebug) {
+            Alert("MINCO Challenge: API_SECRET nie je nastavený!");
+            return INIT_FAILED;
+        }
+    }
+    
+    if(SendIntervalSeconds < 1 || SendIntervalSeconds > 30)
+    {
+        Print("⚠️  WARNING: SendIntervalSeconds should be between 1-30 seconds");
+        SendIntervalSeconds = MathMax(1, MathMin(30, SendIntervalSeconds));
+    }
+    
+    // Inicializácia systému
+    systemStartTime = TimeCurrent();
+    lastDailyReset = TimeCurrent();
+    
+    // Načítaj perzistentné dáta
+    if(EnablePersistence)
+    {
+        LoadPersistentData();
+        LoadGoalsData();
+    }
+    
+    // Inicializuj daily equity s rozšírenou logikou
+    InitializeDailyEquity();
+    
+    // Nastav timer
+    if(!EventSetTimer(SendIntervalSeconds))
+    {
+        Print("❌ Failed to set timer");
+        return INIT_FAILED;
+    }
+    
+    // Počiatočné testy
+    if(!RunSystemTests())
+    {
+        Print("⚠️  Some system tests failed - continuing with warnings");
+    }
+    
+    Print("✅ EA Enhanced v2.0 initialized successfully");
+    Print("⏰ Sending interval: ", SendIntervalSeconds, " seconds");
+    Print("💾 Persistence: ", EnablePersistence ? "ENABLED" : "DISABLED");
+    Print("🎯 Goal tracking: ", TrackGoals ? "ENABLED" : "DISABLED");
+    Print("🔧 Debug mode: ", EnableDebug ? "ENABLED" : "DISABLED");
+    
+    // Pošli úvodné dáta
+    if(EnableSending)
+    {
+        Print("📤 Sending initial data...");
+        SendEnhancedDataToWeb();
+    }
+    
+    return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ Expert deinitialization function                      |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+    // Ulož všetky perzistentné dáta pred vypnutím
+    if(EnablePersistence)
+    {
+        SavePersistentData();
+        SavePerformanceData();
+        SaveGoalsData();
+    }
+    
+    // Pošli finálnu aktualizáciu
+    if(EnableSending && connectionStatus == CONNECTION_ONLINE)
+    {
+        Print("📤 Sending final data update...");
+        SendEnhancedDataToWeb();
+    }
+    
+    EventKillTimer();
+    
+    // Výsledné štatistiky
+    PrintFinalStatistics(reason);
+    
+    Print("🛑 MINCO Challenge EA Enhanced v2.0 Stopped");
+    Print("💾 Final equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), "€");
+    Print("📊 Session statistics saved");
+}
+
+//+------------------------------------------------------------------+
+//| Rozšírená inicializácia daily equity                            |
+//+------------------------------------------------------------------+
+void InitializeDailyEquity()
+{
+    string today = TimeToString(TimeCurrent(), TIME_DATE);
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    
+    // Reset daily request count ak je nový deň
+    if(TimeDay(TimeCurrent()) != TimeDay(lastDailyReset))
+    {
+        dailyRequestCount = 0;
+        lastDailyReset = TimeCurrent();
+        Print("📅 Daily request counter reset");
+    }
+    
+    // Ak je nový deň alebo prvé spustenie
+    if(currentDate != today || isFirstRun)
+    {
+        if(currentDate != "" && currentDate != today)
+        {
+            // Uložiť včerajšie výsledky
+            SaveDailyResults(currentDate, lastEquity);
+            Print("📅 NEW DAY DETECTED: ", currentDate, " -> ", today);
+            Print("💰 Previous day end equity: ", DoubleToString(lastEquity, 2), "€");
+            Print("📈 Previous day profit: ", DoubleToString(lastEquity - dailyStartEquity, 2), "€");
+        }
+        
+        currentDate = today;
+        dailyStartEquity = currentEquity;
+        isFirstRun = false;
+        
+        Print("📅 Daily start equity initialized: ", DoubleToString(dailyStartEquity, 2), "€");
+        
+        // Ulož nový denný štart
+        if(EnablePersistence)
+        {
+            SavePersistentData();
+        }
+        
+        // Reset performance counters pre nový deň
+        if(LogPerformance)
+        {
+            LogPerformanceMetrics("NEW_DAY_INIT");
+        }
+    }
+    
+    lastEquity = currentEquity;
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ Timer function - sends precise data                   |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+    if(!EnableSending)
+    {
+        if(EnableDebug) Print("📴 Sending disabled");
+        return;
+    }
+    
+    // Kontrola denného limitu requestov
+    if(dailyRequestCount >= MaxDailyRequests)
+    {
+        if(EnableDebug) Print("📊 Daily request limit reached (", MaxDailyRequests, ")");
+        return;
+    }
+    
+    // Rozšírená kontrola pripojenia
+    if(!CheckEnhancedConnectionStatus())
+    {
+        if(EnableDebug) Print("🔌 Enhanced connection check failed");
+        return;
+    }
+    
+    datetime currentTime = TimeCurrent();
+    
+    // Inicializuj daily equity
+    InitializeDailyEquity();
+    
+    // Pošli vylepšené dáta
+    bool success = SendEnhancedDataToWeb();
+    
+    if(success)
+    {
+        lastSendTime = currentTime;
+        consecutiveFailures = 0;
+        connectionStatus = CONNECTION_ONLINE;
+        lastSuccessfulConnection = currentTime;
+        totalSuccessfulRequests++;
+        
+        if(EnableDebug) 
+        {
+            Print("✅ Enhanced data sent successfully at ", TimeToString(currentTime));
+        }
+    }
+    else
+    {
+        consecutiveFailures++;
+        connectionStatus = CONNECTION_ERROR;
+        totalFailedRequests++;
+        
+        Print("❌ Failed to send data. Consecutive failures: ", consecutiveFailures);
+        
+        // Pokročilý retry systém
+        if(consecutiveFailures >= MaxRetries)
+        {
+            Print("🔄 Maximum retries reached, extending interval and resetting counter");
+            EventKillTimer();
+            
+            // Exponenciálne zvyšovanie intervalu
+            int newInterval = SendIntervalSeconds * (int)MathPow(2, MathMin(consecutiveFailures - MaxRetries, 4));
+            newInterval = MathMin(newInterval, 60); // Max 60 sekúnd
+            
+            Print("⏰ New retry interval: ", newInterval, " seconds");
+            EventSetTimer(newInterval);
+            consecutiveFailures = 0;
+        }
+        else if(consecutiveFailures > 2)
+        {
+            // Čakaj pred ďalším pokusom
+            Sleep(RetryDelaySeconds * 1000);
+        }
+    }
+    
+    // Performance logging
+    if(LogPerformance && (totalRequestsSent % 50 == 0))
+    {
+        LogPerformanceMetrics("PERIODIC_CHECK");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÉ poslanie dát s kompletnou funkčnosťou                |
+//+------------------------------------------------------------------+
+bool SendEnhancedDataToWeb()
+{
+    if(WebhookURL == "")
+    {
+        Print("❌ Webhook URL not set");
+        return false;
+    }
+    
+    if(API_SECRET == "" && !EnableDebug)
+    {
+        Print("❌ API_SECRET not set - data will be rejected by server");
+        return false;
+    }
+    
+    // Získaj rozšírené dáta
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    double preciseDaily = CalculatePreciseDailyProfit(currentEquity);
+    double liveProfit = GetEnhancedLiveProfit();
+    string tradingStatus = GetDetailedTradingStatus();
+    
+    // Aktualizuj tracking
+    lastEquity = currentEquity;
+    totalRequestsSent++;
+    dailyRequestCount++;
+    
+    // Check for achieved goals
+    if(TrackGoals)
+    {
+        CheckAndLogGoals(currentEquity);
+    }
+    
+    // Ulož perzistentné dáta (throttled)
+    if(EnablePersistence && (totalRequestsSent % 10 == 0))
+    {
+        SavePersistentData();
+    }
+    
+    // Vytvor rozšírený JSON payload
+    string jsonData = "{";
+    jsonData += "\"equity\":" + DoubleToString(currentEquity, 2) + ",";
+    jsonData += "\"dailyProfit\":" + DoubleToString(preciseDaily, 2) + ",";
+    jsonData += "\"liveProfit\":" + DoubleToString(liveProfit, 2) + ",";
+    jsonData += "\"status\":\"" + tradingStatus + "\",";
+    jsonData += "\"secret\":\"" + API_SECRET + "\",";
+    
+    // Rozšírené informácie v2.0
+    jsonData += "\"timestamp\":\"" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\",";
+    jsonData += "\"dailyStart\":" + DoubleToString(dailyStartEquity, 2) + ",";
+    jsonData += "\"account\":\"" + AccountInfoString(ACCOUNT_NAME) + "\",";
+    jsonData += "\"server\":\"" + AccountInfoString(ACCOUNT_SERVER) + "\",";
+    jsonData += "\"version\":\"2.0\",";
+    jsonData += "\"eaUptime\":" + IntegerToString(TimeCurrent() - systemStartTime) + ",";
+    jsonData += "\"totalRequests\":" + IntegerToString(totalRequestsSent) + ",";
+    jsonData += "\"successRate\":" + DoubleToString(GetSuccessRate(), 2) + ",";
+    jsonData += "\"dailyRequests\":" + IntegerToString(dailyRequestCount);
+    
+    jsonData += "}";
+    
+    if(EnableDebug)
+    {
+        Print("📤 Sending enhanced JSON (", StringLen(jsonData), " bytes):");
+        Print("💰 Equity: ", DoubleToString(currentEquity, 2), "€");
+        Print("📊 Daily: ", DoubleToString(preciseDaily, 2), "€");
+        Print("🔄 Live: ", DoubleToString(liveProfit, 2), "€");
+        Print("📋 Status: ", tradingStatus);
+        Print("📈 Success Rate: ", DoubleToString(GetSuccessRate(), 1), "%");
+    }
+    
+    char data[], result[];
+    string headers = "Content-Type: application/json\r\nUser-Agent: MINCO-EA-v2.0\r\n";
+    
+    ArrayResize(data, StringToCharArray(jsonData, data) - 1);
+    
+    uint startTime = GetTickCount();
+    int res = WebRequest("POST", WebhookURL, headers, 8000, data, result, headers);
+    uint responseTime = GetTickCount() - startTime;
+    
+    // Aktualizuj response time statistics
+    totalResponseTime += responseTime;
+    
+    if(res == 200)
+    {
+        if(EnableDebug) 
+        {
+            Print("✅ Enhanced data sent successfully (", responseTime, "ms)");
+            string response = CharArrayToString(result);
+            if(StringLen(response) > 0 && StringLen(response) < 500)
+            {
+                Print("📥 Server response: ", response);
+            }
+        }
+        
+        // Log successful request
+        if(LogPerformance)
+        {
+            LogPerformanceMetrics("SUCCESSFUL_REQUEST", responseTime);
+        }
+        
+        return true;
+    }
+    else
+    {
+        Print("❌ Failed to send enhanced data. Response code: ", res, " (", responseTime, "ms)");
+        
+        if(EnableDebug) 
+        {
+            string response = CharArrayToString(result);
+            if(StringLen(response) > 0)
+            {
+                Print("📥 Error response: ", response);
+            }
+            Print("🔍 Request headers: ", headers);
+            Print("📊 Payload size: ", StringLen(jsonData), " bytes");
+        }
+        
+        // Log failed request
+        if(LogPerformance)
+        {
+            LogPerformanceMetrics("FAILED_REQUEST", responseTime, res);
+        }
+        
+        return false;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| PRESNÝ výpočet denného zisku s error handling                  |
+//+------------------------------------------------------------------+
+double CalculatePreciseDailyProfit(double currentEquity)
+{
+    // Validácia vstupov
+    if(currentEquity <= 0)
+    {
+        Print("⚠️  Warning: Invalid current equity value: ", currentEquity);
+        currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    }
+    
+    // Ak nie je nastavený daily start, použi aktuálny equity
+    if(dailyStartEquity <= 0)
+    {
+        dailyStartEquity = currentEquity;
+        Print("🔧 Daily start equity auto-corrected to: ", DoubleToString(dailyStartEquity, 2), "€");
+    }
+    
+    double dailyProfit = currentEquity - dailyStartEquity;
+    
+    // Sanitácia extrémnych hodnôt
+    double maxReasonableDaily = dailyStartEquity * 10; // Max 1000% daily gain
+    if(MathAbs(dailyProfit) > maxReasonableDaily)
+    {
+        Print("⚠️  Warning: Extreme daily profit detected: ", DoubleToString(dailyProfit, 2), "€");
+        Print("   This might indicate data corruption or system error");
+        
+        if(EnableDebug)
+        {
+            Print("🔍 Debug info:");
+            Print("   Current Equity: ", DoubleToString(currentEquity, 2), "€");
+            Print("   Daily Start: ", DoubleToString(dailyStartEquity, 2), "€");
+            Print("   Calculated Daily: ", DoubleToString(dailyProfit, 2), "€");
+        }
+    }
+    
+    if(EnableDebug)
+    {
+        Print("🧮 Daily calculation: ", DoubleToString(currentEquity, 2), 
+              " - ", DoubleToString(dailyStartEquity, 2), 
+              " = ", DoubleToString(dailyProfit, 2), "€");
+    }
+    
+    return dailyProfit;
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÝ live profit s detailmi                               |
+//+------------------------------------------------------------------+
+double GetEnhancedLiveProfit()
+{
+    double totalProfit = 0;
+    double totalSwap = 0;
+    double totalCommission = 0;
+    int totalPositions = PositionsTotal();
+    
+    for(int i = 0; i < totalPositions; i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            totalProfit += PositionGetDouble(POSITION_PROFIT);
+            totalSwap += PositionGetDouble(POSITION_SWAP);
+            // Note: Commission nie je dostupné pre otvorené pozície
+        }
+    }
+    
+    double result = totalProfit + totalSwap;
+    
+    if(EnableDebug && totalPositions > 0)
+    {
+        Print("💹 Live profit breakdown:");
+        Print("   Positions: ", totalPositions);
+        Print("   Gross Profit: ", DoubleToString(totalProfit, 2), "€");
+        Print("   Swap: ", DoubleToString(totalSwap, 2), "€");
+        Print("   Total Live: ", DoubleToString(result, 2), "€");
+    }
+    
+    return result;
+}
+
+//+------------------------------------------------------------------+
+//| DETAILNÝ trading status s rozšírenými informáciami             |
+//+------------------------------------------------------------------+
+string GetDetailedTradingStatus()
+{
+    int totalPositions = PositionsTotal();
+    
+    if(totalPositions == 0)
+    {
+        return "No positions";
+    }
+    
+    string status = "";
+    int buyCount = 0, sellCount = 0;
+    double totalVolume = 0;
+    double totalProfit = 0;
+    string symbols = "";
+    
+    for(int i = 0; i < totalPositions; i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            string symbol = PositionGetString(POSITION_SYMBOL);
+            double volume = PositionGetDouble(POSITION_VOLUME);
+            double profit = PositionGetDouble(POSITION_PROFIT);
+            
+            totalVolume += volume;
+            totalProfit += profit;
+            
+            // Zbieraj unique symboly
+            if(StringFind(symbols, symbol) == -1)
+            {
+                if(symbols != "") symbols += ",";
+                symbols += symbol;
+            }
+            
+            if(type == POSITION_TYPE_BUY)
+            {
+                buyCount++;
+            }
+            else if(type == POSITION_TYPE_SELL)
+            {
+                sellCount++;
+            }
+        }
+    }
+    
+    // Vytvor inteligentný status
+    if(totalPositions == 1)
+    {
+        // Jedna pozícia - detailný status
+        if(buyCount > 0)
+            status = "Long " + symbols + " (" + DoubleToString(totalVolume, 2) + " lots)";
+        else
+            status = "Short " + symbols + " (" + DoubleToString(totalVolume, 2) + " lots)";
+    }
+    else if(buyCount > 0 && sellCount > 0)
+    {
+        // Mixed pozície
+        status = "Mixed: " + IntegerToString(buyCount) + "L/" + IntegerToString(sellCount) + "S";
+        if(StringLen(symbols) < 20) status += " on " + symbols;
+    }
+    else if(buyCount > 0)
+    {
+        // Iba long pozície
+        status = "Long " + IntegerToString(buyCount) + " pos (" + DoubleToString(totalVolume, 2) + " lots)";
+    }
+    else if(sellCount > 0)
+    {
+        // Iba short pozície
+        status = "Short " + IntegerToString(sellCount) + " pos (" + DoubleToString(totalVolume, 2) + " lots)";
+    }
+    else
+    {
+        status = IntegerToString(totalPositions) + " positions";
+    }
+    
+    // Pridaj profit indikátor ak je významný
+    if(MathAbs(totalProfit) > 1.0)
+    {
+        status += " " + (totalProfit >= 0 ? "+" : "") + DoubleToString(totalProfit, 1) + "€";
+    }
+    
+    return status;
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ kontrola pripojenia                                  |
+//+------------------------------------------------------------------+
+bool CheckEnhancedConnectionStatus()
+{
+    bool terminalConnected = TerminalInfoInteger(TERMINAL_CONNECTED);
+    bool tradeAllowed = AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+    bool dllAllowed = MQLInfoInteger(MQL_DLLS_ALLOWED);
+    bool webRequestAllowed = TerminalInfoInteger(TERMINAL_MQID) > 0; // Proxy pre web request check
+    
+    // Aktualizuj connection status
+    if(!terminalConnected)
+    {
+        connectionStatus = CONNECTION_OFFLINE;
+        if(EnableDebug) Print("🔌 Terminal not connected to server");
+        return false;
+    }
+    
+    if(!dllAllowed)
+    {
+        connectionStatus = CONNECTION_ERROR;
+        if(EnableDebug) Print("🔌 DLLs not allowed - WebRequest will fail");
+        return false;
+    }
+    
+    if(!tradeAllowed)
+    {
+        if(ShowConnectionStatus) Print("⚠️  Trading not allowed - continuing with data sending");
+    }
+    
+    // Test connection lag
+    datetime serverTime = TimeCurrent();
+    datetime localTime = TimeLocal();
+    int timeDiff = (int)MathAbs(serverTime - localTime);
+    
+    if(timeDiff > 300) // 5 minút difference
+    {
+        if(ShowConnectionStatus) 
+            Print("⚠️  Large time difference detected: ", timeDiff, " seconds");
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| SYSTÉMOVÉ TESTY pri štarte                                     |
+//+------------------------------------------------------------------+
+bool RunSystemTests()
+{
+    Print("🧪 Running system tests...");
+    bool allTestsPassed = true;
+    
+    // Test 1: Account info
+    if(AccountInfoString(ACCOUNT_NAME) == "")
+    {
+        Print("❌ Test 1 Failed: Cannot read account name");
+        allTestsPassed = false;
+    }
+    else
+    {
+        Print("✅ Test 1 Passed: Account info readable");
+    }
+    
+    // Test 2: Equity reading
+    double testEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    if(testEquity <= 0)
+    {
+        Print("❌ Test 2 Failed: Cannot read account equity or equity is zero");
+        allTestsPassed = false;
+    }
+    else
+    {
+        Print("✅ Test 2 Passed: Equity reading OK (", DoubleToString(testEquity, 2), "€)");
+    }
+    
+    // Test 3: File operations (ak je persistence enabled)
+    if(EnablePersistence)
+    {
+        int testHandle = FileOpen("MINCO_Test.txt", FILE_WRITE|FILE_TXT);
+        if(testHandle != INVALID_HANDLE)
+        {
+            FileWrite(testHandle, "Test");
+            FileClose(testHandle);
+            FileDelete("MINCO_Test.txt");
+            Print("✅ Test 3 Passed: File operations OK");
+        }
+        else
+        {
+            Print("❌ Test 3 Failed: Cannot write to files");
+            allTestsPassed = false;
+        }
+    }
+    
+    // Test 4: WebRequest permissions
+    if(EnableSending)
+    {
+        if(!TerminalInfoInteger(TERMINAL_DLLS_ALLOWED))
+        {
+            Print("❌ Test 4 Failed: DLL calls not allowed - WebRequest will fail");
+            Print("   Enable 'Allow DLL imports' in EA settings");
+            allTestsPassed = false;
+        }
+        else
+        {
+            Print("✅ Test 4 Passed: WebRequest permissions OK");
+        }
+    }
+    
+    Print("🧪 System tests completed. Overall result: ", (allTestsPassed ? "PASSED" : "FAILED"));
+    return allTestsPassed;
+}
+
+//+------------------------------------------------------------------+
+//| PERZISTENTNÉ ukladanie dát                                     |
+//+------------------------------------------------------------------+
+void SavePersistentData()
+{
+    int handle = FileOpen(persistenceFile, FILE_WRITE|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        FileWrite(handle, "# MINCO Challenge Persistent Data v2.0");
+        FileWrite(handle, "# Generated: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+        FileWrite(handle, "");
+        FileWrite(handle, "[DAILY_DATA]");
+        FileWrite(handle, "DailyStartEquity=" + DoubleToString(dailyStartEquity, 6));
+        FileWrite(handle, "CurrentDate=" + currentDate);
+        FileWrite(handle, "LastEquity=" + DoubleToString(lastEquity, 6));
+        FileWrite(handle, "");
+        FileWrite(handle, "[SYSTEM_DATA]");
+        FileWrite(handle, "SystemStartTime=" + TimeToString(systemStartTime, TIME_DATE|TIME_SECONDS));
+        FileWrite(handle, "TotalRequestsSent=" + IntegerToString(totalRequestsSent));
+        FileWrite(handle, "TotalSuccessfulRequests=" + IntegerToString(totalSuccessfulRequests));
+        FileWrite(handle, "TotalFailedRequests=" + IntegerToString(totalFailedRequests));
+        FileWrite(handle, "LastSave=" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+        FileWrite(handle, "DataVersion=2.0");
+        
+        FileClose(handle);
+        
+        if(EnableDebug)
+        {
+            Print("💾 Persistent data saved to ", persistenceFile);
+        }
+    }
+    else
+    {
+        Print("❌ Failed to save persistent data to ", persistenceFile);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| NAČÍTANIE perzistentných dát                                   |
+//+------------------------------------------------------------------+
+void LoadPersistentData()
+{
+    int handle = FileOpen(persistenceFile, FILE_READ|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        string line;
+        
+        while(!FileIsEnding(handle))
+        {
+            line = FileReadString(handle);
+            
+            if(StringFind(line, "DailyStartEquity=") == 0)
+            {
+                dailyStartEquity = StringToDouble(StringSubstr(line, 17));
+            }
+            else if(StringFind(line, "CurrentDate=") == 0)
+            {
+                currentDate = StringSubstr(line, 12);
+            }
+            else if(StringFind(line, "LastEquity=") == 0)
+            {
+                lastEquity = StringToDouble(StringSubstr(line, 11));
+            }
+            else if(StringFind(line, "SystemStartTime=") == 0)
+            {
+                // Parse system start time if needed
+            }
+            else if(StringFind(line, "TotalRequestsSent=") == 0)  
+            {
+                totalRequestsSent = StringToInteger(StringSubstr(line, 18));
+            }
+            else if(StringFind(line, "TotalSuccessfulRequests=") == 0)
+            {
+                totalSuccessfulRequests = StringToInteger(StringSubstr(line, 24));
+            }
+            else if(StringFind(line, "TotalFailedRequests=") == 0)
+            {
+                totalFailedRequests = StringToInteger(StringSubstr(line, 20));
+            }
+        }
+        
+        FileClose(handle);
+        
+        Print("📂 Persistent data loaded:");
+        Print("   Daily Start: ", DoubleToString(dailyStartEquity, 2), "€");
+        Print("   Current Date: ", currentDate);
+        Print("   Last Equity: ", DoubleToString(lastEquity, 2), "€");
+        Print("   Total Requests: ", totalRequestsSent);
+        Print("   Success Rate: ", DoubleToString(GetSuccessRate(), 1), "%");
+    }
+    else
+    {
+        Print("📂 No persistent data found - using defaults");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| GOALS tracking a ukladanie                                     |
+//+------------------------------------------------------------------+
+void CheckAndLogGoals(double currentEquity)
+{
+    // Definuj kompletné ciele pre challenge
+    double goals[] = {20, 25, 30, 35, 40, 50, 60, 75, 90, 100, 120, 150, 180, 200, 250, 300, 360, 430, 500, 610, 730, 870, 1000, 1500, 2500, 5000, 10000, 25000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 30000000};
+    
+    for(int i = 0; i < ArraySize(goals); i++)
+    {
+        if(currentEquity >= goals[i])
+        {
+            // Check if this goal was already logged
+            if(!IsGoalAlreadyLogged(goals[i]))
+            {
+                LogGoalAchieved(goals[i]);
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Kontrola či bol cieľ už zalogovaný                            |
+//+------------------------------------------------------------------+
+bool IsGoalAlreadyLogged(double goal)
+{
+    int handle = FileOpen(goalsFile, FILE_READ|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        string line;
+        string goalStr = DoubleToString(goal, 2);
+        
+        while(!FileIsEnding(handle))
+        {
+            line = FileReadString(handle);
+            if(StringFind(line, goalStr) >= 0)
+            {
+                FileClose(handle);
+                return true;
+            }
+        }
+        
+        FileClose(handle);
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Zaloguj dosiahnutý cieľ                                       |
+//+------------------------------------------------------------------+
+void LogGoalAchieved(double goal)
+{
+    int handle = FileOpen(goalsFile, FILE_WRITE|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        // Load existing content first
+        FileSeek(handle, 0, SEEK_END);
+        
+        string logEntry = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + 
+                         " - GOAL ACHIEVED: " + DoubleToString(goal, 2) + "€" +
+                         " (Daily: " + DoubleToString(CalculatePreciseDailyProfit(AccountInfoDouble(ACCOUNT_EQUITY)), 2) + "€)";
+        
+        FileWrite(handle, logEntry);
+        FileClose(handle);
+        
+        Print("🎯 GOAL ACHIEVED: ", DoubleToString(goal, 2), "€ at ", TimeToString(TimeCurrent()));
+        
+        // Ak je významnější cieľ, pošli alert
+        if(goal >= 100 || goal == 50 || goal == 25)
+        {
+            Alert("MINCO Challenge: Cieľ ", DoubleToString(goal, 2), "€ dosiahnutý!");
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Uloženie goals dát                                             |
+//+------------------------------------------------------------------+
+void SaveGoalsData()
+{
+    // Goals sú už uložené priebežne v LogGoalAchieved
+    if(EnableDebug) Print("💾 Goals data already saved incrementally");
+}
+
+//+------------------------------------------------------------------+
+//| Načítanie goals dát                                            |
+//+------------------------------------------------------------------+
+void LoadGoalsData()
+{
+    int handle = FileOpen(goalsFile, FILE_READ|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        int goalCount = 0;
+        string line;
+        
+        while(!FileIsEnding(handle))
+        {
+            line = FileReadString(handle);
+            if(StringFind(line, "GOAL ACHIEVED") >= 0)
+            {
+                goalCount++;
+            }
+        }
+        
+        FileClose(handle);
+        Print("🎯 Loaded ", goalCount, " previously achieved goals");
+    }
+    else
+    {
+        Print("🎯 No previous goals data found");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Performance logging                                            |
+//+------------------------------------------------------------------+
+void LogPerformanceMetrics(string eventType, uint responseTime = 0, int errorCode = 0)
+{
+    if(!LogPerformance) return;
+    
+    int handle = FileOpen(performanceFile, FILE_WRITE|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        FileSeek(handle, 0, SEEK_END);
+        
+        string logEntry = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + " | " +
+                         eventType + " | " +
+                         "ResponseTime:" + IntegerToString(responseTime) + "ms | " +
+                         "ErrorCode:" + IntegerToString(errorCode) + " | " +
+                         "SuccessRate:" + DoubleToString(GetSuccessRate(), 1) + "% | " +
+                         "Equity:" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2);
+        
+        FileWrite(handle, logEntry);
+        FileClose(handle);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Uloženie performance dát                                       |
+//+------------------------------------------------------------------+
+void SavePerformanceData()
+{
+    LogPerformanceMetrics("SESSION_END", (uint)(totalResponseTime / MathMax(totalSuccessfulRequests, 1)));
+}
+
+//+------------------------------------------------------------------+
+//| Uloženie výsledkov dňa                                        |
+//+------------------------------------------------------------------+
+void SaveDailyResults(string date, double endEquity)
+{
+    string dailyFile = "MINCO_Daily_" + StringReplace(date, ".", "") + ".txt";
+    int handle = FileOpen(dailyFile, FILE_WRITE|FILE_TXT);
+    
+    if(handle != INVALID_HANDLE)
+    {
+        double dailyProfit = endEquity - dailyStartEquity;
+        
+        FileWrite(handle, "MINCO Challenge Daily Report");
+        FileWrite(handle, "Date: " + date);
+        FileWrite(handle, "Start Equity: " + DoubleToString(dailyStartEquity, 2) + "€");
+        FileWrite(handle, "End Equity: " + DoubleToString(endEquity, 2) + "€");
+        FileWrite(handle, "Daily Profit: " + DoubleToString(dailyProfit, 2) + "€");
+        FileWrite(handle, "Daily Return: " + DoubleToString((dailyProfit/dailyStartEquity)*100, 2) + "%");
+        FileWrite(handle, "Requests Sent: " + IntegerToString(dailyRequestCount));
+        FileWrite(handle, "Success Rate: " + DoubleToString(GetSuccessRate(), 1) + "%");
+        
+        FileClose(handle);
+        
+        Print("📊 Daily results saved to ", dailyFile);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Získanie success rate                                          |
+//+------------------------------------------------------------------+
+double GetSuccessRate()
+{
+    if(totalRequestsSent == 0) return 0.0;
+    return ((double)totalSuccessfulRequests / (double)totalRequestsSent) * 100.0;
+}
+
+//+------------------------------------------------------------------+
+//| Finálne štatistiky                                            |
+//+------------------------------------------------------------------+
+void PrintFinalStatistics(int reason)
+{
+    Print("📊 SESSION STATISTICS:");
+    Print("========================");
+    Print("Session Duration: ", (TimeCurrent() - systemStartTime), " seconds");
+    Print("Total Requests: ", totalRequestsSent);
+    Print("Successful: ", totalSuccessfulRequests);
+    Print("Failed: ", totalFailedRequests);
+    Print("Success Rate: ", DoubleToString(GetSuccessRate(), 1), "%");
+    Print("Avg Response Time: ", (totalSuccessfulRequests > 0 ? (int)(totalResponseTime / totalSuccessfulRequests) : 0), "ms");
+    Print("Daily Requests: ", dailyRequestCount);
+    Print("Final Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), "€");
+    Print("Daily Profit: ", DoubleToString(CalculatePreciseDailyProfit(AccountInfoDouble(ACCOUNT_EQUITY)), 2), "€");
+    Print("Shutdown Reason: ", reason);
+    Print("========================");
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ Trade function                                       |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    // Kontrola významných zmien equity
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    
+    if(MathAbs(currentEquity - lastEquity) >= MinEquityChange)
+    {
+        if(EnableDebug)
+        {
+            Print("💹 Significant equity change detected: ", 
+                  DoubleToString(lastEquity, 2), "€ -> ", 
+                  DoubleToString(currentEquity, 2), "€ (", 
+                  DoubleToString(currentEquity - lastEquity, 2), "€)");
+        }
+        
+        // Pošli okamžite aktualizáciu ak nie je príliš častá
+        if(EnableSending && (TimeCurrent() - lastSendTime) >= 1)
+        {
+            SendEnhancedDataToWeb();
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ROZŠÍRENÁ Trade transaction handler                            |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                       const MqlTradeRequest& request,
+                       const MqlTradeResult& result)
+{
+    if(EnableDebug && trans.type == TRADE_TRANSACTION_DEAL_ADD)
+    {
+        Print("💹 New trade executed - sending immediate enhanced update");
+        Print("   Deal: ", trans.deal, " | Volume: ", trans.volume, " | Symbol: ", trans.symbol);
+        
+        // Pri novom obchode pošli okamžite aktualizáciu
+        if(EnableSending)
+        {
+            // Krátke čakanie aby sa equity stihlo aktualizovať
+            Sleep(100);
+            SendEnhancedDataToWeb();
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Manuálne testovanie pre debugging                             |
+//+------------------------------------------------------------------+
+void SendTestEnhancedData()
+{
+    Print("🧪 Sending enhanced test data...");
+    
+    double testEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    
+    // Simuluj test scenár
+    dailyStartEquity = testEquity - 15.75; // Simuluj 15.75€ daily profit
+    
+    bool success = SendEnhancedDataToWeb();
+    
+    if(success)
+    {
+        Print("✅ Enhanced test data sent successfully");
+    }
+    else
+    {
+        Print("❌ Enhanced test data send failed");
+    }
+    
+    // Resetuj
+    InitializeDailyEquity();
+}
+
+//+------------------------------------------------------------------+
+//| Rozšírené informácie o účte pre debugging                     |
+//+------------------------------------------------------------------+
+void PrintEnhancedAccountInfo()
+{
+    Print("=== ENHANCED ACCOUNT INFO ===");
+    Print("Name: ", AccountInfoString(ACCOUNT_NAME));
+    Print("Server: ", AccountInfoString(ACCOUNT_SERVER));
+    Print("Company: ", AccountInfoString(ACCOUNT_COMPANY));
+    Print("Currency: ", AccountInfoString(ACCOUNT_CURRENCY));
+    Print("Balance: ", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2), "€");
+    Print("Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), "€");
+    Print("Margin: ", DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN), 2), "€");
+    Print("Free Margin: ", DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2), "€");
+    Print("Margin Level: ", DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), 2), "%");
+    Print("Positions: ", PositionsTotal());
+    Print("Daily Start: ", DoubleToString(dailyStartEquity, 2), "€");
+    Print("Daily Profit: ", DoubleToString(CalculatePreciseDailyProfit(AccountInfoDouble(ACCOUNT_EQUITY)), 2), "€");
+    Print("Connection Status: ", EnumToString(connectionStatus));
+    Print("System Uptime: ", (TimeCurrent() - systemStartTime), " seconds");
+    Print("Success Rate: ", DoubleToString(GetSuccessRate(), 1), "%");
+    Print("=============================");
+}
+
+//+------------------------------------------------------------------+
+//| String replace helper function                                 |
+//+------------------------------------------------------------------+
+string StringReplace(string str, string find, string replace)
+{
+    string result = str;
+    int pos = 0;
+    
+    while((pos = StringFind(result, find, pos)) >= 0)
+    {
+        result = StringSubstr(result, 0, pos) + replace + StringSubstr(result, pos + StringLen(find));
+        pos += StringLen(replace);
+    }
+    
+    return result;
+}
